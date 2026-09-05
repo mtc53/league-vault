@@ -590,7 +590,46 @@ enum LCU {
                 scan.missing.append("\(path) [\(probe.status == 0 ? "no response" : "404")]")
             }
         }
+        writeDiagnostics(scan, credentials: credentials)
         return scan
+    }
+
+    /// Dumps the full scan and the client's entire endpoint list to disk, so the
+    /// report does not have to be copied out of the window by hand.
+    static var diagnosticsDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("LeagueVault/diagnostics", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static func writeDiagnostics(_ scan: BehaviourScan, credentials: LCUCredentials) {
+        var report = "League Vault behaviour scan\n"
+        report += Date().description + "\n\n"
+        report += "catalogue: \(scan.totalEndpoints) endpoints, \(scan.catalogueSize) matching\n"
+        report += scan.catalogueLog.map { "  " + $0 }.joined(separator: "\n") + "\n"
+        if !scan.plugins.isEmpty {
+            report += "\nplugins: " + scan.plugins.joined(separator: ", ") + "\n"
+        }
+        for entry in scan.withData {
+            report += "\n=== \(entry.path) ===\n\(entry.body)\n"
+        }
+        if !scan.empty.isEmpty {
+            report += "\n=== exists but empty ===\n" + scan.empty.joined(separator: "\n") + "\n"
+        }
+        if !scan.missing.isEmpty {
+            report += "\n=== not present ===\n" + scan.missing.joined(separator: "\n") + "\n"
+        }
+        try? report.write(to: diagnosticsDirectory.appendingPathComponent("scan.txt"),
+                          atomically: true, encoding: .utf8)
+
+        // The complete endpoint list is the most useful artefact of all.
+        if let catalogue = catalogueCache {
+            let all = allEndpoints(in: catalogue)
+            try? all.joined(separator: "\n").write(
+                to: diagnosticsDirectory.appendingPathComponent("endpoints.txt"),
+                atomically: true, encoding: .utf8)
+        }
     }
 
     // MARK: Honor

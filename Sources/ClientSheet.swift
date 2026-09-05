@@ -404,6 +404,15 @@ struct ClientSheet: View {
                 }
                 .disabled(scanning)
 
+                if scanned {
+                    Button("Reveal report in Finder") {
+                        NSWorkspace.shared.selectFile(
+                            LCU.diagnosticsDirectory.appendingPathComponent("scan.txt").path,
+                            inFileViewerRootedAtPath: LCU.diagnosticsDirectory.path)
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                }
                 if let scan, !scan.withData.isEmpty || !scan.empty.isEmpty {
                     Button("Copy all") {
                         var text = "catalogue: \(scan.helpWorked ? "\(scan.catalogueSize) matching paths" : "unavailable")"
@@ -470,6 +479,11 @@ struct ClientSheet: View {
             if let scan, !scan.missing.isEmpty {
                 Text("Not present: \(scan.missing.count) paths")
                     .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            if scanned {
+                Text("Written to ~/Library/Application Support/LeagueVault/diagnostics/")
+                    .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
             if let scan, !scan.snippets.isEmpty {
