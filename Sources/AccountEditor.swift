@@ -60,34 +60,40 @@ struct AccountEditor: View {
             .padding(.top, 18)
             .padding(.bottom, 12)
 
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { t in
-                    Label(t.rawValue, systemImage: t.symbol).tag(t)
+            if !isNew {
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases) { t in
+                        Label(t.rawValue, systemImage: t.symbol).tag(t)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 20)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 20)
 
-            Divider().padding(.top, 12)
+            Divider().padding(.top, isNew ? 0 : 12)
 
             ScrollView {
                 Group {
-                    switch tab {
-                    case .identity:  identityForm
-                    case .rank:      rankForm
-                    case .game:      gameForm
-                    case .penalties: penaltiesForm
+                    if isNew {
+                        newAccountForm
+                    } else {
+                        switch tab {
+                        case .identity:  identityForm
+                        case .rank:      rankForm
+                        case .game:      gameForm
+                        case .penalties: penaltiesForm
+                        }
                     }
                 }
                 .padding(20)
             }
-            .frame(height: 420)
+            .frame(height: isNew ? 260 : 420)
 
             Divider()
 
             HStack {
-                if tab == .penalties {
+                if !isNew && tab == .penalties {
                     Button {
                         draft.penalties.append(Penalty())
                     } label: {
@@ -100,14 +106,62 @@ struct AccountEditor: View {
                 Button(isNew ? "Add Account" : "Save") { save() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(draft.label.trimmingCharacters(in: .whitespaces).isEmpty
-                              && draft.gameName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(isNew
+                              ? draft.loginUsername.trimmingCharacters(in: .whitespaces).isEmpty
+                              : (draft.label.trimmingCharacters(in: .whitespaces).isEmpty
+                                 && draft.gameName.trimmingCharacters(in: .whitespaces).isEmpty
+                                 && draft.loginUsername.trimmingCharacters(in: .whitespaces).isEmpty))
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
         .frame(width: 620)
         .onAppear(perform: loadPassword)
+    }
+
+    // MARK: New account
+
+    /// Just the login. Riot ID, region, rank, champions, wallet and penalties all arrive
+    /// the first time the account is refreshed with the client signed in to it.
+    private var newAccountForm: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Field("Username or email") {
+                TextField("", text: $draft.loginUsername)
+            }
+
+            Field("Password") {
+                HStack(spacing: 6) {
+                    if showPassword {
+                        TextField("", text: $password)
+                    } else {
+                        SecureField("", text: $password)
+                    }
+                    Button {
+                        showPassword.toggle()
+                    } label: {
+                        Image(systemName: showPassword ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.accentColor)
+                Text("That is all that is needed. Sign in to this account in the League client and press Refresh — the Riot ID, server, rank, last game, champions, wallet and any penalties fill themselves in, and the nickname takes the account's name.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.08)))
+
+            Text("Everything else stays editable afterwards from Edit.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     // MARK: Identity

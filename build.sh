@@ -53,10 +53,25 @@ fi
 # signature changes every single build. Create one with tools/make-signing-cert.sh.
 SIGN_ID="League Vault Local Signing"
 if security find-certificate -c "$SIGN_ID" >/dev/null 2>&1; then
-    codesign --force --deep --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 \
-        && echo "Signed with $SIGN_ID (permissions persist across builds)" \
-        || { echo "(signing with $SIGN_ID failed; falling back to ad-hoc)"; \
-             codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true; }
+    # Retry once: the first use in a session can lose a race with the keychain's
+    # access prompt, and a silent ad-hoc fallback would quietly revoke the app's
+    # Accessibility permission.
+    if ! codesign --force --deep --sign "$SIGN_ID" "$APP" 2>/tmp/lv-codesign.log; then
+        sleep 2
+        codesign --force --deep --sign "$SIGN_ID" "$APP" 2>>/tmp/lv-codesign.log || true
+    fi
+
+    if codesign -d -r- "$APP" 2>/dev/null | grep -q "certificate leaf"; then
+        echo "Signed with $SIGN_ID (Accessibility permission persists across builds)"
+    else
+        echo
+        echo "!!  Could not sign with $SIGN_ID — falling back to ad-hoc."
+        echo "!!  macOS will treat this as a DIFFERENT app and revoke its Accessibility"
+        echo "!!  permission. Autofill will stop working until you re-grant it."
+        echo "!!  $(tail -1 /tmp/lv-codesign.log 2>/dev/null)"
+        echo
+        codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+    fi
 else
     codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "(ad-hoc signing skipped)"
     echo "Tip: run tools/make-signing-cert.sh so Accessibility permission survives rebuilds."

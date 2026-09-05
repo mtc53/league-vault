@@ -528,7 +528,14 @@ struct Account: Codable, Identifiable, Hashable {
     var displayName: String {
         if !label.isEmpty { return label }
         if !gameName.isEmpty { return riotID }
+        if !loginUsername.isEmpty { return loginUsername }
         return "Untitled account"
+    }
+
+    /// Added by hand with only a login: no Riot ID and no PUUID yet, so it takes its
+    /// identity from whichever account is signed in the first time it is refreshed.
+    var isUnidentified: Bool {
+        gameName.isEmpty && (puuid ?? "").isEmpty
     }
 
     /// u.gg profile page for this account, e.g. u.gg/lol/profile/na1/Name-TAG/overview

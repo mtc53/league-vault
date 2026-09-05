@@ -22,9 +22,22 @@ signs it. Copy the result over `/Applications/League Vault.app` to install it.
 
 ## What each field is for
 
+### Adding an account
+
+**A username and password is all you need.** The new-account form asks for nothing else:
+sign in to the account in the League client, press Refresh, and the entry links itself
+to whoever is signed in — Riot ID, server, rank, last game, champions, wallet, honor and
+penalties all fill in, and the nickname takes the account's name.
+
+Until it is linked, the entry shows its login as its name, and Refresh says so rather
+than claiming the client is signed in to something else. **Edit** still exposes every
+field for anything you want to set by hand.
+
 | Field | Filled by |
 |---|---|
-| Nickname, folder, Riot ID, server | you |
+| Username and password | you |
+| Nickname, folder | you, or the account name on first link |
+| Riot ID, server | first Refresh |
 | Full access (FA / NFA) | you |
 | Rank (Solo/Duo + Flex), LP, W/L | Refresh, or by hand |
 | Last played game (champion, queue, result, KDA, length, time) | Refresh, or by hand |

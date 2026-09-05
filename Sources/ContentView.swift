@@ -602,6 +602,9 @@ struct ContentView: View {
     /// Does the running client's signed-in account correspond to this vault entry?
     private func isSameAccount(_ account: Account, _ me: LCUSummoner) -> Bool {
         if let puuid = account.puuid, !puuid.isEmpty { return puuid == me.puuid }
+        // An entry added with only a login adopts whoever is signed in, which is the
+        // point of adding one that way.
+        if account.isUnidentified { return true }
         guard !account.gameName.isEmpty else { return false }
         return account.riotID.compare(me.riotID, options: .caseInsensitive) == .orderedSame
     }
@@ -637,7 +640,9 @@ struct ContentView: View {
         defer { refreshingIDs.remove(account.id) }
 
         guard let credentials = LCU.discover() else {
-            return .skipped("Open the League client and sign in to \(account.displayName) to refresh it.")
+            return .skipped(account.isUnidentified
+                ? "Open the League client and sign in as \(account.displayName) — the first refresh links this entry to it."
+                : "Open the League client and sign in to \(account.displayName) to refresh it.")
         }
 
         let snapshot: LCU.Snapshot
@@ -652,8 +657,12 @@ struct ContentView: View {
         }
 
         let before = account.riotID
+        let wasUnidentified = account.isUnidentified
         guard let updated = apply(snapshot, to: account) else {
             return .failed("\(account.displayName): vanished mid-refresh.")
+        }
+        if wasUnidentified {
+            return .updated("Linked to \(updated.riotID) and filled in.")
         }
         if !before.isEmpty && before != updated.riotID {
             return .updated("Riot ID changed: \(before) → \(updated.riotID).")
