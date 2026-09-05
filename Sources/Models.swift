@@ -370,7 +370,15 @@ struct OwnedChampion: Codable, Hashable, Identifiable, Comparable {
 
 enum QuickPrep {
     /// The dark-elf icon with the red tear streaks, found by matching the catalogue.
-    static let defaultIconId = 6923
+    static let preferredIconId = 6923
+    /// Every account owns this one, so it is what an unowned preference falls back to.
+    /// Riot resets an unowned icon server-side, which makes the fallback worth having.
+    static let fallbackIconId = 29
+
+    static let defaultIconId = preferredIconId
+
+    /// The only two icons quick prep will set.
+    static var choices: [Int] { [preferredIconId, fallbackIconId] }
 
     private enum Keys {
         static let icon = "prepIconId"
@@ -380,8 +388,21 @@ enum QuickPrep {
     }
 
     static var iconId: Int {
-        get { UserDefaults.standard.object(forKey: Keys.icon) as? Int ?? defaultIconId }
+        get {
+            let stored = UserDefaults.standard.object(forKey: Keys.icon) as? Int ?? preferredIconId
+            // Anything else that was saved earlier collapses back to the two choices.
+            return choices.contains(stored) ? stored : preferredIconId
+        }
         set { UserDefaults.standard.set(newValue, forKey: Keys.icon) }
+    }
+
+    /// Which icon to actually set, given what the account owns.
+    static func resolvedIcon(preferring wanted: Int, ownedIcons: Set<Int>) -> (id: Int, fellBack: Bool) {
+        // An empty set means the inventory could not be read — do not second-guess it.
+        guard !ownedIcons.isEmpty else { return (wanted, false) }
+        if ownedIcons.contains(wanted) { return (wanted, false) }
+        // Falling back to the same id is not a fallback worth reporting.
+        return (fallbackIconId, fallbackIconId != wanted)
     }
     static var setsIcon: Bool {
         get { UserDefaults.standard.object(forKey: Keys.setIcon) as? Bool ?? true }

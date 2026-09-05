@@ -52,10 +52,16 @@ final class ClientModel: ObservableObject {
         var report: [String] = []
 
         if setIcon {
+            friendProgress = "Checking icon ownership…"
+            let owned = await LCU.ownedProfileIcons(credentials: credentials)
+            let choice = QuickPrep.resolvedIcon(preferring: iconId, ownedIcons: owned)
+
             friendProgress = "Setting profile icon…"
             do {
-                try await LCU.setProfileIcon(id: iconId, credentials: credentials)
-                report.append("Icon set to \(iconId).")
+                try await LCU.setProfileIcon(id: choice.id, credentials: credentials)
+                report.append(choice.fellBack
+                    ? "Icon \(iconId) is not owned — set \(choice.id) instead."
+                    : "Icon set to \(choice.id).")
             } catch {
                 report.append("Icon failed: \(error.localizedDescription)")
             }
@@ -221,8 +227,6 @@ struct ClientSheet: View {
             if let credentials = model.credentials {
                 IconPickerSheet(credentials: credentials,
                                 currentIconId: model.summoner?.profileIconId) { applied in
-                    prepIconId = applied
-                    QuickPrep.iconId = applied
                     toast = "Profile icon set to \(applied)."
                     Task { await model.probe() }
                 }
@@ -525,7 +529,11 @@ struct ClientSheet: View {
 
     private var prepSummary: [String] {
         var steps: [String] = []
-        if prepSetIcon { steps.append("set the profile icon to \(prepIconId)") }
+        if prepSetIcon {
+            steps.append(prepIconId == QuickPrep.preferredIconId
+                         ? "set the profile icon to 6923, or 29 if it is not owned"
+                         : "set the profile icon to \(prepIconId)")
+        }
         if prepClearChallenges { steps.append("clear the challenge badges, title and banner") }
         if prepRemoveFriends { steps.append("remove all \(model.friends.count) friends — permanently") }
         return steps
@@ -545,14 +553,19 @@ struct ClientSheet: View {
                     HStack(spacing: 8) {
                         Toggle("Set profile icon", isOn: $prepSetIcon)
                             .toggleStyle(.checkbox)
-                        TextField("6923", value: $prepIconId, format: .number)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 70)
-                            .disabled(!prepSetIcon)
-                        Button("Pick…") { showIconPicker = true }
-                            .buttonStyle(.link)
-                            .font(.system(size: 11))
-                            .disabled(!prepSetIcon)
+                        Picker("", selection: $prepIconId) {
+                            Text("6923 — preferred").tag(QuickPrep.preferredIconId)
+                            Text("29 — always owned").tag(QuickPrep.fallbackIconId)
+                        }
+                        .labelsHidden()
+                        .frame(width: 165)
+                        .disabled(!prepSetIcon)
+                    }
+                    if prepSetIcon && prepIconId == QuickPrep.preferredIconId {
+                        Text("If the account does not own 6923, it sets 29 instead — Riot resets an unowned icon server-side.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Toggle("Clear challenge badges, title and banner", isOn: $prepClearChallenges)

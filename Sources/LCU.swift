@@ -949,6 +949,57 @@ enum LCU {
         return result
     }
 
+    // MARK: Owned profile icons
+
+    /// Icon ids this account actually owns. The client accepts any id, but Riot resets
+    /// an unowned one server-side, so quick prep checks before choosing.
+    static func ownedProfileIcons(credentials: LCUCredentials) async -> Set<Int> {
+        let paths = [
+            "/lol-inventory/v2/inventory/SUMMONER_ICON",
+            "/lol-inventory/v1/inventory?inventoryTypes=%5B%22SUMMONER_ICON%22%5D",
+            "/lol-inventory/v2/inventory?inventoryTypes=%5B%22SUMMONER_ICON%22%5D",
+            "/lol-inventory/v1/inventory"
+        ]
+        for path in paths {
+            guard let data = try? await request("GET", path, credentials: credentials) else { continue }
+            let owned = parseOwnedIcons(data)
+            if !owned.isEmpty { return owned }
+        }
+        return []
+    }
+
+    /// Inventory entries vary in shape between versions; take any SUMMONER_ICON row and
+    /// read whichever id field it carries.
+    static func parseOwnedIcons(_ data: Data) -> Set<Int> {
+        guard let root = try? JSONSerialization.jsonObject(with: data) else { return [] }
+
+        var rows: [[String: Any]] = []
+        if let list = root as? [[String: Any]] {
+            rows = list
+        } else if let object = root as? [String: Any] {
+            // Some builds wrap the list, e.g. {"data":{"SUMMONER_ICON":[…]}}
+            for value in object.values {
+                if let list = value as? [[String: Any]] { rows += list }
+                if let nested = value as? [String: Any] {
+                    for inner in nested.values where inner is [[String: Any]] {
+                        rows += inner as! [[String: Any]]
+                    }
+                }
+            }
+        }
+
+        var owned = Set<Int>()
+        for row in rows {
+            if let type = row["inventoryType"] as? String,
+               !type.uppercased().contains("SUMMONER_ICON") { continue }
+            for key in ["itemId", "id", "contentId", "inventoryItemId"] {
+                if let value = row[key] as? Int, value >= 0 { owned.insert(value); break }
+                if let value = row[key] as? String, let n = Int(value), n >= 0 { owned.insert(n); break }
+            }
+        }
+        return owned
+    }
+
     // MARK: Friends
 
     struct Friend: Identifiable, Hashable {
