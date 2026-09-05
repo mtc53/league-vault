@@ -685,8 +685,6 @@ enum LCU {
         var hasActivePenalty = false
         var reformCard: String?
         var restrictions: [Penalty] = []
-        var voiceChatRestricted = false
-        var textChatRestricted = false
     }
 
     /// GET /lol-summoner-profiles/v1/get-restriction-view
@@ -793,12 +791,6 @@ enum LCU {
             snapshot.restrictions = parseRestrictions(data)
         }
 
-        // A genuine voice-restriction flag, rather than an inference from honor.
-        if let data = try? await request("GET", "/lol-premade-voice/v1/parental-controls-status", credentials: credentials),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            snapshot.voiceChatRestricted = object["isVoiceChatRestricted"] as? Bool ?? false
-            snapshot.textChatRestricted = object["isTextChatRestricted"] as? Bool ?? false
-        }
 
         if let data = try? await request("GET", "/lol-leaver-buster/v1/notifications", credentials: credentials) {
             let parsed = parseLeaverNotifications(data)
@@ -888,14 +880,6 @@ enum LCU {
             result += penalties(from: honor)
         }
 
-        if snapshot.voiceChatRestricted {
-            result.append(Penalty(source: .client, kind: .voiceMuted,
-                                  detail: "Voice chat restricted", startedAt: Date()))
-        }
-        if snapshot.textChatRestricted {
-            result.append(Penalty(source: .client, kind: .chatRestriction,
-                                  detail: "Text chat restricted", startedAt: Date()))
-        }
 
         // Queue delay: a live countdown in seconds.
         if let seconds = snapshot.lowPriorityPenaltySeconds, seconds > 0 {
@@ -940,18 +924,6 @@ enum LCU {
             ))
         }
 
-        // "Team voice muted — Low Honor" has no row of its own in the restriction view
-        // and no countdown, so below Honor 3 it is inferred — unless the voice service
-        // already reported a real restriction above.
-        if !snapshot.voiceChatRestricted, let level = snapshot.honor?.level, level <= 2 {
-            result.append(Penalty(
-                source: .client,
-                kind: .voiceMuted,
-                detail: "Low honor (Honor \(level)) — inferred, the client publishes no endpoint for this",
-                startedAt: Date(),
-                expiresAt: nil
-            ))
-        }
         return result
     }
 
