@@ -351,7 +351,7 @@ struct AccountEditor: View {
                     HStack(spacing: 10) {
                         Field("Type") {
                             Picker("", selection: $penalty.kind) {
-                                ForEach(PenaltyKind.allCases) { Text($0.rawValue).tag($0) }
+                                ForEach(PenaltyKind.selectable) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
                         }

@@ -723,6 +723,9 @@ enum LCU {
         var result: [Penalty] = []
         for restriction in list {
             let type = (restriction.restrictionType ?? "").uppercased()
+            // REPUTATION_LIMIT is progress back to full honor, not a restriction on
+            // play. The honor level is surfaced on its own instead.
+            if type.contains("REPUTATION") { continue }
             let redemption = restriction.expirationData?.redemptions?.first
 
             var parts: [String] = []
@@ -872,13 +875,9 @@ enum LCU {
     static func penalties(from snapshot: BehaviourSnapshot) -> [Penalty] {
         var result: [Penalty] = []
 
-        // The restriction view is authoritative — it carries the same rows the client
-        // renders. Only fall back to deriving one from honor when it is unavailable.
+        // The restriction view is authoritative. Honor is reported as a level on the
+        // account rather than as a penalty.
         result += snapshot.restrictions
-        let haveReputationRow = snapshot.restrictions.contains { $0.kind == .honorDowngrade }
-        if !haveReputationRow, let honor = snapshot.honor {
-            result += penalties(from: honor)
-        }
 
 
         // Queue delay: a live countdown in seconds.
@@ -927,29 +926,6 @@ enum LCU {
         return result
     }
 
-    private static func penalties(from honor: HonorProfile) -> [Penalty] {
-        var result: [Penalty] = []
-        if let remaining = honor.gamesRemaining, remaining > 0 {
-            let total = honor.gamesRequired.map { " of \($0)" } ?? ""
-            result.append(Penalty(
-                source: .client,
-                kind: .honorDowngrade,
-                detail: "\(remaining)\(total) eligible games to recover"
-                    + (honor.level.map { " · currently Honor \($0)" } ?? ""),
-                startedAt: Date(),
-                expiresAt: nil
-            ))
-        } else if honor.rewardsLocked {
-            result.append(Penalty(
-                source: .client,
-                kind: .honorDowngrade,
-                detail: "Honor rewards locked" + (honor.level.map { " · Honor \($0)" } ?? ""),
-                startedAt: Date(),
-                expiresAt: nil
-            ))
-        }
-        return result
-    }
 
     // MARK: Challenges
 

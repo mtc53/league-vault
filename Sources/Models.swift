@@ -252,6 +252,12 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Offered in the editor. Honor downgrade is excluded: honor is shown as a level on
+    /// the account, not as a penalty. The case remains so older files still decode.
+    static var selectable: [PenaltyKind] {
+        allCases.filter { $0 != .honorDowngrade }
+    }
+
     var symbol: String {
         switch self {
         case .chatRestriction:   return "bubble.left.and.exclamationmark.bubble.right"
