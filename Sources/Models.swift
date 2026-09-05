@@ -269,6 +269,31 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
 
     /// Permanent penalties never expire.
     var isPermanentByNature: Bool { self == .permanentBan }
+
+    /// Penalties that stop you playing normally right now, rather than ones you are
+    /// merely working off. These get red treatment instead of amber.
+    var isCritical: Bool {
+        switch self {
+        case .queueDelay, .lowPriorityQueue, .suspension, .permanentBan: return true
+        default: return false
+        }
+    }
+
+    /// Queue delay leads the list — it is the one that costs you time every game.
+    var severityRank: Int {
+        switch self {
+        case .queueDelay:        return 0
+        case .suspension,
+             .permanentBan:      return 1
+        case .lowPriorityQueue:  return 2
+        case .rankedRestriction: return 3
+        case .chatRestriction,
+             .voiceMuted:        return 4
+        case .honorDowngrade:    return 5
+        case .honorLock,
+             .other:             return 6
+        }
+    }
 }
 
 /// Where a penalty record came from.
@@ -509,6 +534,17 @@ struct Account: Codable, Identifiable, Hashable {
     }
 
     var activePenalties: [Penalty] { penalties.filter(\.isActive) }
+
+    /// The most serious active penalty, for badges and banners.
+    var worstActivePenalty: Penalty? {
+        activePenalties.min { $0.kind.severityRank < $1.kind.severityRank }
+    }
+
+    var hasCriticalPenalty: Bool { activePenalties.contains { $0.kind.isCritical } }
+
+    var activeQueueDelays: [Penalty] {
+        activePenalties.filter { $0.kind == .queueDelay }
+    }
 
     /// Replaces penalties the client reported, leaving hand-entered ones untouched.
     mutating func replaceClientPenalties(with detected: [Penalty]) {

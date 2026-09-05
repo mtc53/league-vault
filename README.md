@@ -54,9 +54,16 @@ to keep in sync, so removing the last account from a folder makes the folder go 
 Refresh pulls the account's owned-champion list from the client. The detail pane shows
 the count, a filter box, and the names as a grid (first 24, with a *Show all*).
 
-To find which account owns a champion, switch the sidebar search scope from **All
-fields** to **Champion** and type a champion name — the list narrows to accounts that
-own it. Only accounts you have refreshed at least once have a champion list.
+To find which accounts own a champion, click **Champion** at the bottom of the sidebar.
+The picker lists every champion across the whole vault with the number of accounts that
+own it; pick one and the sidebar narrows to those accounts, with a chip showing the
+active filter until you clear it.
+
+The filter matches the champion exactly, so filtering on **Vi** does not drag in Viktor
+accounts — while the picker's own search box is a substring, so typing `vi` still finds
+Viktor. The sidebar search scope also has a **Champion** mode for typing a name directly.
+
+Only accounts you have refreshed at least once have a champion list.
 
 ## Blue essence and RP
 

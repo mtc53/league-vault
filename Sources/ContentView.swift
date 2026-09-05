@@ -22,6 +22,9 @@ struct ContentView: View {
     @State private var search = ""
     @State private var scope: SearchScope = .all
     @State private var dropTarget: String?
+    @State private var championOnly: String?
+    @State private var showChampionPicker = false
+    @State private var championQuery = ""
     @State private var sort: SortOrder = .name
     @State private var penaltiesOnly = false
     @State private var groupByFolder = true
@@ -47,6 +50,13 @@ struct ContentView: View {
         var list = store.accounts
 
         if penaltiesOnly { list = list.filter(\.hasActivePenalty) }
+        if let championOnly {
+            list = list.filter { account in
+                account.ownedChampions.contains {
+                    $0.name.compare(championOnly, options: .caseInsensitive) == .orderedSame
+                }
+            }
+        }
 
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty, scope == .champion {
@@ -100,6 +110,20 @@ struct ContentView: View {
             return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
         }
         return names.map { ($0, grouped[$0] ?? []) }
+    }
+
+    /// Champion → number of accounts that own it, across the whole vault.
+    private var championIndex: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for account in store.accounts {
+            // One account counts once per champion even if listed twice.
+            for name in Set(account.ownedChampions.map(\.name)) {
+                counts[name, default: 0] += 1
+            }
+        }
+        return counts
+            .map { (name: $0.key, count: $0.value) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     /// Every folder that exists across the whole library, for the Move-to menu.
@@ -230,28 +254,138 @@ struct ContentView: View {
 
             Divider()
 
-            HStack(spacing: 10) {
-                Toggle(isOn: $penaltiesOnly) {
-                    Label("Penalties only", systemImage: "exclamationmark.triangle")
+            VStack(spacing: 5) {
+                if let championOnly {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.3.fill").font(.system(size: 9))
+                        Text("Owns \(championOnly)")
+                            .font(.system(size: 11, weight: .semibold))
+                        Spacer()
+                        Button {
+                            self.championOnly = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
+                    )
+                    .padding(.horizontal, 10)
                 }
-                .toggleStyle(.checkbox)
 
-                Toggle("Folders", isOn: $groupByFolder)
+                HStack(spacing: 10) {
+                    Toggle(isOn: $penaltiesOnly) {
+                        Label("Penalties", systemImage: "exclamationmark.triangle")
+                    }
                     .toggleStyle(.checkbox)
 
-                Spacer()
+                    Toggle("Folders", isOn: $groupByFolder)
+                        .toggleStyle(.checkbox)
 
-                Text("\(filtered.count)/\(store.accounts.count)")
-                    .foregroundStyle(.secondary)
+                    Button {
+                        showChampionPicker = true
+                    } label: {
+                        Label("Champion", systemImage: "person.3")
+                    }
+                    .buttonStyle(.link)
+                    .popover(isPresented: $showChampionPicker, arrowEdge: .top) {
+                        championPicker
+                    }
+
+                    Spacer()
+
+                    Text("\(filtered.count)/\(store.accounts.count)")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.system(size: 11))
+                .padding(.horizontal, 12)
             }
-            .font(.system(size: 11))
-            .padding(.horizontal, 12)
             .padding(.vertical, 7)
         }
         .searchable(text: $search, placement: .sidebar, prompt: searchPrompt)
         .searchScopes($scope) {
             ForEach(SearchScope.allCases) { Text($0.rawValue).tag($0) }
         }
+    }
+
+    /// Pick a champion and the sidebar narrows to accounts that own it.
+    private var championPicker: some View {
+        let all = championIndex
+        let matches = championQuery.trimmingCharacters(in: .whitespaces).isEmpty
+            ? all
+            : all.filter { $0.name.localizedCaseInsensitiveContains(championQuery) }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Show accounts that own")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                TextField("Viktor", text: $championQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+
+            if all.isEmpty {
+                Text("No champion lists yet. Refresh an account with the League client signed in to pull its inventory.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 240)
+            } else if matches.isEmpty {
+                Text("No champion matches “\(championQuery)”.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(spacing: 1) {
+                        ForEach(matches, id: \.name) { entry in
+                            Button {
+                                championOnly = entry.name
+                                showChampionPicker = false
+                                championQuery = ""
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(entry.name)
+                                        .font(.system(size: 12))
+                                    Spacer()
+                                    Text("\(entry.count)")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(height: 260)
+            }
+
+            if championOnly != nil {
+                Divider()
+                Button("Clear filter") {
+                    championOnly = nil
+                    showChampionPicker = false
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+            }
+        }
+        .padding(12)
+        .frame(width: 260)
     }
 
     private func row(_ account: Account) -> some View {
@@ -577,11 +711,14 @@ struct AccountRow: View {
                     Text(account.displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    if account.hasActivePenalty {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange)
-                            .help("\(account.activePenalties.count) active penalty")
+                    if let worst = account.worstActivePenalty {
+                        Image(systemName: worst.kind == .queueDelay
+                              ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: worst.kind.isCritical ? 11 : 10,
+                                          weight: worst.kind.isCritical ? .bold : .regular))
+                            .foregroundStyle(worst.kind.accent)
+                            .help(account.activePenalties.map { "\($0.kind.rawValue): \($0.detail)" }
+                                    .joined(separator: "\n"))
                     }
                 }
                 HStack(spacing: 5) {

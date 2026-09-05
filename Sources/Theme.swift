@@ -19,6 +19,11 @@ extension Tier {
     }
 }
 
+extension PenaltyKind {
+    /// Red for anything blocking play, amber for the rest.
+    var accent: Color { isCritical ? .red : .orange }
+}
+
 /// Small rounded label used for rank, region and status.
 struct Chip: View {
     var text: String

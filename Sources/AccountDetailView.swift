@@ -95,8 +95,12 @@ struct AccountDetailView: View {
                     if let rp = account.riotPoints {
                         Chip(text: "\(rp.grouped) RP", color: Color(red: 0.90, green: 0.55, blue: 0.30))
                     }
-                    if account.hasActivePenalty {
-                        Chip(text: "\(account.activePenalties.count) active penalty", color: .orange, filled: true)
+                    if let worst = account.worstActivePenalty {
+                        Chip(text: account.activePenalties.count == 1
+                             ? worst.kind.rawValue
+                             : "\(account.activePenalties.count) active penalties",
+                             color: worst.kind.accent,
+                             filled: true)
                     }
                 }
             }
@@ -161,26 +165,48 @@ struct AccountDetailView: View {
     }
 
     private var penaltyBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+        let accent = account.worstActivePenalty?.kind.accent ?? .orange
+        let delays = account.activeQueueDelays
+
+        return HStack(alignment: .top, spacing: 11) {
+            Image(systemName: delays.isEmpty ? "exclamationmark.triangle.fill" : "exclamationmark.octagon.fill")
+                .font(.system(size: delays.isEmpty ? 15 : 19))
+                .foregroundStyle(accent)
+
             VStack(alignment: .leading, spacing: 3) {
-                Text(account.activePenalties.count == 1 ? "1 active penalty" : "\(account.activePenalties.count) active penalties")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(account.activePenalties.map { $0.kind.rawValue }.joined(separator: " · "))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                if let delay = delays.first {
+                    // Queue delay costs time on every single game, so it leads.
+                    Text(delays.count == 1 ? "Queue delay active" : "\(delays.count) queue delays active")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(accent)
+                    Text(delay.detail)
+                        .font(.system(size: 12, weight: .medium))
+                    let others = account.activePenalties.filter { $0.kind != .queueDelay }
+                    if !others.isEmpty {
+                        Text("Also: " + others.map { $0.kind.rawValue }.joined(separator: " · "))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(account.activePenalties.count == 1
+                         ? "1 active penalty"
+                         : "\(account.activePenalties.count) active penalties")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(account.activePenalties.map { $0.kind.rawValue }.joined(separator: " · "))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
         }
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.orange.opacity(0.12))
+                .fill(accent.opacity(delays.isEmpty ? 0.12 : 0.18))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+                .strokeBorder(accent.opacity(delays.isEmpty ? 0.35 : 0.7), lineWidth: delays.isEmpty ? 1 : 2)
         )
     }
 
@@ -385,10 +411,18 @@ struct AccountDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 8) {
-                    ForEach(account.penalties.sorted { ($0.isActive ? 1 : 0, $0.startedAt) > ($1.isActive ? 1 : 0, $1.startedAt) }) { penalty in
+                    ForEach(account.penalties.sorted { a, b in
+                        if a.isActive != b.isActive { return a.isActive }
+                        if a.kind.severityRank != b.kind.severityRank {
+                            return a.kind.severityRank < b.kind.severityRank
+                        }
+                        return a.startedAt > b.startedAt
+                    }) { penalty in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: penalty.kind.symbol)
-                                .foregroundStyle(penalty.isActive ? .orange : .secondary)
+                                .font(.system(size: penalty.isActive && penalty.kind.isCritical ? 14 : 12,
+                                              weight: penalty.isActive && penalty.kind.isCritical ? .bold : .regular))
+                                .foregroundStyle(penalty.isActive ? penalty.kind.accent : Color.secondary)
                                 .frame(width: 18)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
@@ -398,7 +432,7 @@ struct AccountDetailView: View {
                                         Chip(text: "from client", color: .secondary)
                                     }
                                     Chip(text: penalty.statusDisplay,
-                                         color: penalty.isActive ? .orange : .secondary,
+                                         color: penalty.isActive ? penalty.kind.accent : .secondary,
                                          filled: penalty.isActive)
                                 }
                                 if !penalty.detail.isEmpty {
@@ -416,7 +450,12 @@ struct AccountDetailView: View {
                         .padding(10)
                         .background(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(penalty.isActive ? Color.orange.opacity(0.10) : Color.primary.opacity(0.04))
+                                .fill(penalty.isActive ? penalty.kind.accent.opacity(0.12) : Color.primary.opacity(0.04))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(penalty.isActive && penalty.kind.isCritical
+                                              ? penalty.kind.accent.opacity(0.55) : .clear, lineWidth: 1.5)
                         )
                     }
                 }
