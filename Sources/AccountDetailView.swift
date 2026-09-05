@@ -15,6 +15,7 @@ struct AccountDetailView: View {
     @State private var revealPassword = false
     @State private var championFilter = ""
     @State private var showAllChampions = false
+    @State private var showSignIn = false
 
     var body: some View {
         ScrollView {
@@ -32,6 +33,9 @@ struct AccountDetailView: View {
             .padding(20)
         }
         .background(Color(nsColor: .underPageBackgroundColor))
+        .sheet(isPresented: $showSignIn) {
+            SignInHelperSheet(account: account).environmentObject(store)
+        }
         .onChange(of: account.id) { _, _ in
             revealPassword = false
             championFilter = ""
@@ -117,6 +121,13 @@ struct AccountDetailView: View {
                         }
                     }
                     .disabled(isRefreshing)
+
+                    Button {
+                        showSignIn = true
+                    } label: {
+                        Label("Sign in", systemImage: "person.badge.key")
+                    }
+                    .help("Get the Riot Client to the login screen with this account's details ready")
 
                     Button("Edit", action: onEdit)
 

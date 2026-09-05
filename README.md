@@ -120,6 +120,21 @@ Riot publishes no *names* for profile icons — Data Dragon and Community Dragon
 expose only ids and image paths — so the search box filters by id, not by champion.
 Find an id on a community icon site and type it in, or scroll the grid.
 
+## Signing in
+
+The **Sign in** button on an account walks the Riot Client to the login screen with that
+account's details on hand:
+
+1. **Quit Riot Client** if it is running (it is signed in to someone else), or **Open**
+   it if it is not
+2. **Copy username** — paste it in
+3. **Copy password** — paste it in and press return; the clipboard wipes after 45 seconds
+
+**It does not type the password in and submit it.** That last step stays with you, on
+purpose: automated credential submission is the one thing this app will not do, however
+convenient it would be. If you want genuine one-click sign-in, a password manager's
+autofill is built for it and integrates with the Riot Client properly.
+
 ## Friends
 
 The **League Client** sheet lists the signed-in account's friends and offers
