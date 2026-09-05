@@ -196,13 +196,33 @@ Data Dragon CDN (public static files, no API key). Icons are cached under
 `~/Library/Caches/LeagueVault/profileicons`, and the patch version is looked up
 once a day. Until an icon loads, the row shows tinted initials.
 
-### Penalties are manual on purpose
+### Penalties: partly automatic
 
-Riot publishes no API for bans, chat restrictions, ranked restrictions or
-low-priority queue. Nothing can fetch them, so you record them in an account's
-**Penalties** tab. The app computes whether one is still active from its end
-date, shows a warning badge in the sidebar, and the **Penalties only** filter
-at the bottom of the sidebar narrows the list to accounts currently serving one.
+The client's Behaviour Standing panel shows active penalties, so some of this
+*is* reachable over the LCU — the public web API is what never exposed it.
+
+**Imported on Refresh.** `/lol-honor-v2/v1/profile` gives the honor level and the
+recovery progress the panel labels "Honor Downgrade — n Games":
+
+```json
+{"honorLevel":2,"rewardsLocked":false,
+ "redemptions":[{"eventType":"REPUTATION_ELIGIBLE_GAME_PLAYED","remaining":7,"required":10}]}
+```
+
+That becomes a **Honor downgrade** penalty reading "7 of 10 eligible games to
+recover · currently Honor 2", tagged **from client**, plus an Honor chip on the
+account.
+
+**Still by hand.** Queue delay and team voice mute have not been located yet —
+the client serves them from an endpoint the `/help` catalogue did not reveal.
+Use **Scan for penalty endpoints** in the League Client sheet to hunt for it: it
+reads the client's own API catalogue, filters for honor / behaviour / restriction
+/ reputation / voice / dodge paths, reads each one, and reports which answered
+with data, which answered empty, and whether `/help` worked at all.
+
+**Manual records are never clobbered.** A refresh replaces only penalties tagged
+`client`; anything you typed stays put. Either kind drives the sidebar warning
+badge and the **Penalties only** filter.
 
 ## Renaming an account
 

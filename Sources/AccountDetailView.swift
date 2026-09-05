@@ -85,6 +85,10 @@ struct AccountDetailView: View {
                     if let level = account.summonerLevel {
                         Chip(text: "Level \(level)", color: .secondary)
                     }
+                    if let honor = account.honorLevel {
+                        Chip(text: "Honor \(honor)", color: honor >= 3 ? .green : .orange)
+                            .help(honor >= 3 ? "Honor is in good standing." : "Honor is below 3 — rewards may be locked.")
+                    }
                     if let be = account.blueEssence {
                         Chip(text: "\(be.grouped) BE", color: Color(red: 0.35, green: 0.62, blue: 0.92))
                     }
@@ -376,7 +380,7 @@ struct AccountDetailView: View {
     private var penaltiesCard: some View {
         Card(title: "Penalties", systemImage: "exclamationmark.shield") {
             if account.penalties.isEmpty {
-                Text("No penalties recorded. Riot exposes no API for bans or restrictions, so these are tracked by hand in Edit.")
+                Text("No penalties recorded. Refresh imports what the client reports; anything it does not expose you can add by hand in Edit.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             } else {
@@ -390,6 +394,9 @@ struct AccountDetailView: View {
                                 HStack(spacing: 6) {
                                     Text(penalty.kind.rawValue)
                                         .font(.system(size: 13, weight: .medium))
+                                    if penalty.source == .client {
+                                        Chip(text: "from client", color: .secondary)
+                                    }
                                     Chip(text: penalty.statusDisplay,
                                          color: penalty.isActive ? .orange : .secondary,
                                          filled: penalty.isActive)

@@ -485,6 +485,11 @@ struct ContentView: View {
         if !snapshot.champions.isEmpty { current.ownedChampions = snapshot.champions }
         if let be = snapshot.blueEssence { current.blueEssence = be }
         if let rp = snapshot.riotPoints { current.riotPoints = rp }
+        if let honor = snapshot.honor {
+            current.honorLevel = honor.level
+            // Only client-reported penalties are replaced; hand-entered ones stay.
+            current.replaceClientPenalties(with: LCU.penalties(from: honor))
+        }
         current.lastRefreshed = Date()
         store.update(current)
         return current

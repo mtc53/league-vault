@@ -194,6 +194,7 @@ enum LCU {
         var champions: [OwnedChampion]
         var blueEssence: Int?
         var riotPoints: Int?
+        var honor: HonorProfile?
     }
 
     static func snapshot(credentials: LCUCredentials) async throws -> Snapshot {
@@ -203,6 +204,7 @@ enum LCU {
         async let gameTask = lastGame(puuid: me.puuid, credentials: credentials)
         async let championTask = ownedChampions(summonerId: me.summonerId, credentials: credentials)
         async let walletTask = wallet(credentials: credentials)
+        async let honorTask = honor(credentials: credentials)
 
         let purse = await walletTask
         return Snapshot(summoner: me,
@@ -211,7 +213,8 @@ enum LCU {
                         lastGame: await gameTask,
                         champions: await championTask,
                         blueEssence: purse.blueEssence,
-                        riotPoints: purse.riotPoints)
+                        riotPoints: purse.riotPoints,
+                        honor: await honorTask)
     }
 
     // MARK: Champion inventory
@@ -366,30 +369,115 @@ enum LCU {
         return found.sorted()
     }
 
+    struct BehaviourScan {
+        var withData: [(path: String, body: String)] = []
+        var empty: [String] = []
+        var catalogueSize = 0
+        var helpWorked = false
+    }
+
+    /// "REPUTATION_ELIGIBLE_GAME_PLAYED" in the honor payload says Riot calls this
+    /// system reputation, so search widely rather than around one guessed word.
+    static let behaviourKeywords = [
+        "honor", "behavior", "behaviour", "restrict", "penalt", "leaver", "standing",
+        "muted", "mute", "reputation", "reform", "sanction", "punish", "voice",
+        "dodge", "gatekeep", "chat-restrict", "matchmaking"
+    ]
+
+    static let behaviourFallbackPaths = [
+        "/lol-honor-v2/v1/profile",
+        "/lol-honor-v2/v1/rewards",
+        "/lol-leaver-buster/v1/notifications",
+        "/lol-player-behavior/v1/restrictions",
+        "/lol-matchmaking/v1/search",
+        "/lol-premade-voice/v1/settings",
+        "/lol-gameflow/v1/gameflow-metadata/player-status",
+        "/lol-chat/v1/me"
+    ]
+
     /// Everything the client will tell us about behaviour, honor and restrictions.
-    static func scanBehaviourEndpoints(credentials: LCUCredentials) async -> [(path: String, body: String)] {
-        let keywords = ["honor", "behavior", "behaviour", "restrict", "penalt", "leaver", "standing", "muted"]
-        var paths = await discoverEndpoints(matching: keywords, credentials: credentials)
+    static func scanBehaviourEndpoints(credentials: LCUCredentials) async -> BehaviourScan {
+        var scan = BehaviourScan()
+        var paths = await discoverEndpoints(matching: behaviourKeywords, credentials: credentials)
+        scan.catalogueSize = paths.count
+        scan.helpWorked = !paths.isEmpty
 
-        // Endpoints known to exist even when /help is unavailable or trimmed.
-        let fallbacks = [
-            "/lol-honor-v2/v1/profile",
-            "/lol-leaver-buster/v1/notifications",
-            "/lol-player-behavior/v1/restrictions",
-            "/lol-chat/v1/me"
-        ]
-        for path in fallbacks where !paths.contains(path) { paths.append(path) }
+        for path in behaviourFallbackPaths where !paths.contains(path) { paths.append(path) }
 
-        var results: [(String, String)] = []
         for path in paths {
             guard let data = try? await request("GET", path, credentials: credentials),
                   var body = String(data: data, encoding: .utf8) else { continue }
             body = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Skip the empties so the report is only what actually answered.
-            guard !body.isEmpty, body != "[]", body != "{}", body != "null" else { continue }
-            results.append((path, body))
+            if body.isEmpty || body == "[]" || body == "{}" || body == "null" {
+                // An endpoint that exists but is empty is still worth knowing about.
+                scan.empty.append(path)
+            } else {
+                scan.withData.append((path, body))
+            }
         }
-        return results
+        return scan
+    }
+
+    // MARK: Honor
+
+    struct HonorProfile {
+        var level: Int?
+        var rewardsLocked: Bool
+        var gamesRemaining: Int?
+        var gamesRequired: Int?
+    }
+
+    /// GET /lol-honor-v2/v1/profile — the client's Behaviour Standing panel reads this.
+    static func honor(credentials: LCUCredentials) async -> HonorProfile? {
+        guard let data = try? await request("GET", "/lol-honor-v2/v1/profile", credentials: credentials) else {
+            return nil
+        }
+        return parseHonor(data)
+    }
+
+    static func parseHonor(_ data: Data) -> HonorProfile? {
+        struct DTO: Decodable {
+            struct Redemption: Decodable {
+                let eventType: String?
+                let remaining: Int?
+                let required: Int?
+            }
+            let honorLevel: Int?
+            let rewardsLocked: Bool?
+            let redemptions: [Redemption]?
+        }
+        guard let dto = try? JSONDecoder().decode(DTO.self, from: data) else { return nil }
+        // The panel's "HONOR DOWNGRADE — n Games" is this redemption's `remaining`.
+        let redemption = dto.redemptions?.first { ($0.remaining ?? 0) > 0 } ?? dto.redemptions?.first
+        return HonorProfile(level: dto.honorLevel,
+                            rewardsLocked: dto.rewardsLocked ?? false,
+                            gamesRemaining: redemption?.remaining,
+                            gamesRequired: redemption?.required)
+    }
+
+    /// Turns the honor profile into penalty records the vault can hold.
+    static func penalties(from honor: HonorProfile) -> [Penalty] {
+        var result: [Penalty] = []
+        if let remaining = honor.gamesRemaining, remaining > 0 {
+            let total = honor.gamesRequired.map { " of \($0)" } ?? ""
+            result.append(Penalty(
+                source: .client,
+                kind: .honorDowngrade,
+                detail: "\(remaining)\(total) eligible games to recover"
+                    + (honor.level.map { " · currently Honor \($0)" } ?? ""),
+                startedAt: Date(),
+                expiresAt: nil
+            ))
+        } else if honor.rewardsLocked {
+            result.append(Penalty(
+                source: .client,
+                kind: .honorDowngrade,
+                detail: "Honor rewards locked" + (honor.level.map { " · Honor \($0)" } ?? ""),
+                startedAt: Date(),
+                expiresAt: nil
+            ))
+        }
+        return result
     }
 
     // MARK: Challenges

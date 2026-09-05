@@ -430,6 +430,8 @@ struct Account: Codable, Identifiable, Hashable {
     var blueEssence: Int?
     var riotPoints: Int?
 
+    var honorLevel: Int?
+
     var puuid: String?
     var summonerLevel: Int?
     /// Summoner (profile) icon id from Riot, rendered from Data Dragon.
@@ -458,6 +460,7 @@ struct Account: Codable, Identifiable, Hashable {
         notes = (try? c.decodeIfPresent(String.self, forKey: .notes)).flatMap { $0 } ?? ""
         ownedChampions = (try? c.decodeIfPresent([OwnedChampion].self, forKey: .ownedChampions)).flatMap { $0 } ?? []
         blueEssence = try? c.decodeIfPresent(Int.self, forKey: .blueEssence)
+        honorLevel = try? c.decodeIfPresent(Int.self, forKey: .honorLevel)
         riotPoints = try? c.decodeIfPresent(Int.self, forKey: .riotPoints)
         puuid = try? c.decodeIfPresent(String.self, forKey: .puuid)
         summonerLevel = try? c.decodeIfPresent(Int.self, forKey: .summonerLevel)

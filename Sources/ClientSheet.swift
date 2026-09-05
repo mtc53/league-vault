@@ -139,7 +139,7 @@ struct ClientSheet: View {
     @State private var confirmPrep = false
     @State private var prepReport: [String] = []
     @State private var scanning = false
-    @State private var scanResults: [(path: String, body: String)] = []
+    @State private var scan: LCU.BehaviourScan?
     @State private var scanned = false
 
     /// The vault entry, if any, that matches the signed-in account.
@@ -289,6 +289,9 @@ struct ClientSheet: View {
                         if let level = me.summonerLevel {
                             Chip(text: "Level \(level)", color: .secondary)
                         }
+                        if let honor = model.snapshot?.honor?.level {
+                            Chip(text: "Honor \(honor)", color: honor >= 3 ? .green : .orange)
+                        }
                         if let count = model.snapshot?.champions.count, count > 0 {
                             Chip(text: "\(count) champions", color: .secondary)
                         }
@@ -388,7 +391,7 @@ struct ClientSheet: View {
                         scanning = true
                         defer { scanning = false }
                         if let credentials = model.credentials {
-                            scanResults = await LCU.scanBehaviourEndpoints(credentials: credentials)
+                            scan = await LCU.scanBehaviourEndpoints(credentials: credentials)
                             scanned = true
                         }
                     }
@@ -401,11 +404,15 @@ struct ClientSheet: View {
                 }
                 .disabled(scanning)
 
-                if !scanResults.isEmpty {
+                if let scan, !scan.withData.isEmpty || !scan.empty.isEmpty {
                     Button("Copy all") {
-                        let text = scanResults.map { "=== \($0.path) ===\n\($0.body)" }.joined(separator: "\n\n")
+                        var text = "help catalogue: \(scan.helpWorked ? "\(scan.catalogueSize) paths" : "unavailable")\n"
+                        text += scan.withData.map { "=== \($0.path) ===\n\($0.body)" }.joined(separator: "\n\n")
+                        if !scan.empty.isEmpty {
+                            text += "\n\n=== answered but empty ===\n" + scan.empty.joined(separator: "\n")
+                        }
                         Clipboard.copy(text)
-                        toast = "Copied \(scanResults.count) responses."
+                        toast = "Copied \(scan.withData.count) responses."
                     }
                     .buttonStyle(.link)
                     .font(.system(size: 11))
@@ -413,20 +420,36 @@ struct ClientSheet: View {
                 Spacer()
             }
 
-            if scanned && scanResults.isEmpty {
-                Text("Nothing answered. The client may not expose these while signed out of a game session.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+            if let scan {
+                Text(scan.helpWorked
+                     ? "Catalogue: \(scan.catalogueSize) matching paths from /help."
+                     : "The /help catalogue was unavailable — only the known paths were tried.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
             }
 
-            if !scanResults.isEmpty {
-                Text("\(scanResults.count) endpoint\(scanResults.count == 1 ? "" : "s") answered:")
+            if scanned, let scan, scan.withData.isEmpty {
+                Text("Nothing returned data. Penalty endpoints may only answer while a game session is active.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let scan, !scan.empty.isEmpty {
+                Text("Answered but empty: " + scan.empty.joined(separator: ", "))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let scan, !scan.withData.isEmpty {
+                Text("\(scan.withData.count) endpoint\(scan.withData.count == 1 ? "" : "s") returned data:")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(scanResults, id: \.path) { result in
+                        ForEach(scan.withData, id: \.path) { result in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(result.path)
                                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -727,6 +750,10 @@ struct ClientSheet: View {
         if let region = model.region { account.region = region }
         if let snapshot = model.snapshot {
             for entry in snapshot.ranks { account.setRank(entry) }
+            if let honor = snapshot.honor {
+                account.honorLevel = honor.level
+                account.replaceClientPenalties(with: LCU.penalties(from: honor))
+            }
             if let game = snapshot.lastGame { account.lastGame = game }
             if !snapshot.champions.isEmpty { account.ownedChampions = snapshot.champions }
             if let be = snapshot.blueEssence { account.blueEssence = be }
