@@ -77,6 +77,16 @@ Keys are matched case-insensitively across `lol_blue_essence` / `blueEssence` /
 numbers, doubles or strings. If every shape fails, the client sheet shows a **wallet
 unavailable** chip rather than silently showing nothing.
 
+## Friends
+
+The **League Client** sheet lists the signed-in account's friends and offers
+**Remove All Friends…** — `DELETE /lol-chat/v1/friends/{pid}` for each, paced at
+roughly eight per second so the chat service keeps up.
+
+This is irreversible and hits your real account immediately, so it sits behind a
+confirmation that names the account and the exact count. There is no undo in the
+client; re-adding means sending every request again.
+
 ## Diagnostics
 
 The **League Client** sheet has a collapsible *Diagnostics* section: type any LCU path,

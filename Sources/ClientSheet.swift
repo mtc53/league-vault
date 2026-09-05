@@ -11,6 +11,8 @@ final class ClientModel: ObservableObject {
     @Published var isConnected = false
     @Published var busy = false
     @Published var lastError: String?
+    @Published var friends: [LCU.Friend] = []
+    @Published var friendProgress: String?
 
     func probe() async {
         busy = true
@@ -18,7 +20,7 @@ final class ClientModel: ObservableObject {
         lastError = nil
 
         guard let found = LCU.discover() else {
-            credentials = nil; snapshot = nil; summoner = nil; region = nil; isConnected = false
+            credentials = nil; snapshot = nil; summoner = nil; region = nil; isConnected = false; friends = []
             status = "League client not running."
             return
         }
@@ -27,6 +29,7 @@ final class ClientModel: ObservableObject {
         do {
             let snap = try await LCU.snapshot(credentials: found)
             snapshot = snap
+            friends = await LCU.friends(credentials: found)
             summoner = snap.summoner
             region = snap.region
             isConnected = true
@@ -38,6 +41,17 @@ final class ClientModel: ObservableObject {
             status = "Client found, but not ready."
             lastError = error.localizedDescription
         }
+    }
+
+    func removeAllFriends() async -> (removed: Int, failed: Int) {
+        guard let credentials else { return (0, 0) }
+        busy = true
+        defer { busy = false; friendProgress = nil }
+        let result = await LCU.removeAllFriends(credentials: credentials) { done, total in
+            self.friendProgress = "Removing \(done) of \(total)…"
+        }
+        friends = await LCU.friends(credentials: credentials)
+        return result
     }
 
     func rename(to gameName: String, tag: String) async -> Bool {
@@ -69,6 +83,7 @@ struct ClientSheet: View {
     @State private var probePath = "/lol-inventory/v1/wallet"
     @State private var probeResult = ""
     @State private var probing = false
+    @State private var confirmRemoveFriends = false
 
     /// The vault entry, if any, that matches the signed-in account.
     private var linkedAccount: Account? {
@@ -110,6 +125,8 @@ struct ClientSheet: View {
                         renameBlock(me)
                         Divider()
                         vaultBlock(me)
+                        Divider()
+                        friendsBlock
                         Divider()
                         diagnosticsBlock
                     } else {
@@ -276,6 +293,67 @@ struct ClientSheet: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private var friendsBlock: some View {
+        FormSection("Friends") {
+            if model.friends.isEmpty {
+                Text("No friends on this account, or the client did not return the list.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(model.friends.count) friend\(model.friends.count == 1 ? "" : "s") on \(model.summoner?.riotID ?? "this account").")
+                    .font(.system(size: 12))
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(model.friends) { friend in
+                            Text(friend.name)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(height: min(CGFloat(model.friends.count) * 16 + 12, 96))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+
+                HStack(spacing: 10) {
+                    Button(role: .destructive) {
+                        confirmRemoveFriends = true
+                    } label: {
+                        Text("Remove All Friends…")
+                    }
+                    .disabled(model.busy)
+
+                    if let progress = model.friendProgress {
+                        Text(progress)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Text("Deletes every friend from the signed-in account's list. The client offers no undo — re-adding means sending each request again.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .alert("Remove all \(model.friends.count) friends?", isPresented: $confirmRemoveFriends) {
+            Button("Cancel", role: .cancel) { }
+            Button("Remove \(model.friends.count)", role: .destructive) {
+                Task {
+                    let result = await model.removeAllFriends()
+                    toast = result.failed == 0
+                        ? "Removed \(result.removed) friends."
+                        : "Removed \(result.removed), \(result.failed) failed."
+                }
+            }
+        } message: {
+            Text("This removes every friend from \(model.summoner?.riotID ?? "the signed-in account"). It cannot be undone, and it affects your real account immediately.")
         }
     }
 

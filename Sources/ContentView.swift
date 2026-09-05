@@ -266,26 +266,35 @@ struct ContentView: View {
     }
 
     /// Moves dragged accounts into `folder`. The payload is each account's UUID.
+    ///
+    /// The move is applied on the *next* runloop turn, never inline. Re-filing an
+    /// account rebuilds the sidebar's sections, and doing that while AppKit is still
+    /// inside the drop event frees the row its outline view is tracking — which
+    /// crashes in -[NSOutlineView rowForItem:]. Returning true first lets the drag
+    /// finish, then the list rebuilds on its own terms.
     private func receiveDrop(_ payloads: [String], into folder: String) -> Bool {
-        var moved: [Account] = []
-        for raw in payloads {
-            guard let id = UUID(uuidString: raw),
-                  var account = store.accounts.first(where: { $0.id == id }),
-                  account.folder != folder else { continue }
-            account.folder = folder
-            store.update(account)
-            moved.append(account)
-        }
-        guard let first = moved.first else { return false }
+        let ids = payloads.compactMap { UUID(uuidString: $0) }
+        guard !ids.isEmpty else { return false }
 
-        // Re-assert selection so the row you just dropped stays the one on screen.
-        selection = first.id
-        banner = Banner(
-            text: folder.isEmpty
-                ? "Moved \(first.displayName) out of its folder."
-                : "Moved \(first.displayName) to “\(folder)”.",
-            isError: false
-        )
+        DispatchQueue.main.async {
+            var moved: [Account] = []
+            for id in ids {
+                guard var account = store.accounts.first(where: { $0.id == id }),
+                      account.folder != folder else { continue }
+                account.folder = folder
+                store.update(account)
+                moved.append(account)
+            }
+            guard let first = moved.first else { return }
+            // Selection is a UUID and the account keeps its identity across the move,
+            // so it survives on its own — no need to re-assert it here.
+            banner = Banner(
+                text: folder.isEmpty
+                    ? "Moved \(first.displayName) out of its folder."
+                    : "Moved \(first.displayName) to “\(folder)”.",
+                isError: false
+            )
+        }
         return true
     }
 

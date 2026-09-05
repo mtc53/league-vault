@@ -323,6 +323,76 @@ enum LCU {
         return Wallet(blueEssence: number(blueEssenceKeys), riotPoints: number(riotPointsKeys))
     }
 
+    // MARK: Friends
+
+    struct Friend: Identifiable, Hashable {
+        var id: String          // the client's own handle for this friend
+        var name: String
+        var note: String
+    }
+
+    /// GET /lol-chat/v1/friends
+    static func friends(credentials: LCUCredentials) async -> [Friend] {
+        guard let data = try? await request("GET", "/lol-chat/v1/friends", credentials: credentials) else {
+            return []
+        }
+        return parseFriends(data)
+    }
+
+    static func parseFriends(_ data: Data) -> [Friend] {
+        struct DTO: Decodable {
+            let pid: String?
+            let puuid: String?
+            let id: String?
+            let name: String?
+            let gameName: String?
+            let tagLine: String?
+            let note: String?
+        }
+        guard let list = try? JSONDecoder().decode([DTO].self, from: data) else { return [] }
+
+        var seen = Set<String>()
+        var result: [Friend] = []
+        for dto in list {
+            // The client keys friend removal on `pid`; the others are fallbacks.
+            guard let handle = [dto.pid, dto.puuid, dto.id]
+                .compactMap({ $0 })
+                .first(where: { !$0.isEmpty }), !seen.contains(handle) else { continue }
+
+            let display: String = {
+                if let game = dto.gameName, !game.isEmpty {
+                    let tag = dto.tagLine ?? ""
+                    return tag.isEmpty ? game : "\(game)#\(tag)"
+                }
+                if let name = dto.name, !name.isEmpty { return name }
+                return handle
+            }()
+
+            seen.insert(handle)
+            result.append(Friend(id: handle, name: display, note: dto.note ?? ""))
+        }
+        return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// DELETE /lol-chat/v1/friends/{pid}. Irreversible — the client does not undo this.
+    static func removeFriend(id: String, credentials: LCUCredentials) async -> Bool {
+        (try? await request("DELETE", "/lol-chat/v1/friends/\(id)", credentials: credentials)) != nil
+    }
+
+    /// Removes every friend, reporting how many went and how many refused.
+    static func removeAllFriends(credentials: LCUCredentials,
+                                 progress: @MainActor (Int, Int) -> Void = { _, _ in }) async -> (removed: Int, failed: Int) {
+        let all = await friends(credentials: credentials)
+        var removed = 0, failed = 0
+        for (index, friend) in all.enumerated() {
+            if await removeFriend(id: friend.id, credentials: credentials) { removed += 1 } else { failed += 1 }
+            await progress(index + 1, all.count)
+            // The chat service dislikes a tight loop of deletes.
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+        return (removed, failed)
+    }
+
     // MARK: Diagnostics
 
     /// Raw GET against any LCU path, for finding endpoints this build guessed wrong.
