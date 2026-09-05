@@ -197,6 +197,7 @@ enum LCU {
         var blueEssence: Int?
         var riotPoints: Int?
         var honor: HonorProfile?
+        var behaviour: BehaviourSnapshot?
     }
 
     static func snapshot(credentials: LCUCredentials) async throws -> Snapshot {
@@ -206,9 +207,10 @@ enum LCU {
         async let gameTask = lastGame(puuid: me.puuid, credentials: credentials)
         async let championTask = ownedChampions(summonerId: me.summonerId, credentials: credentials)
         async let walletTask = wallet(credentials: credentials)
-        async let honorTask = honor(credentials: credentials)
+        async let behaviourTask = behaviour(credentials: credentials)
 
         let purse = await walletTask
+        let behaviourResult = await behaviourTask
         return Snapshot(summoner: me,
                         region: await regionTask,
                         ranks: await ranksTask,
@@ -216,7 +218,8 @@ enum LCU {
                         champions: await championTask,
                         blueEssence: purse.blueEssence,
                         riotPoints: purse.riotPoints,
-                        honor: await honorTask)
+                        honor: behaviourResult.honor,
+                        behaviour: behaviourResult)
     }
 
     // MARK: Champion inventory
@@ -607,8 +610,166 @@ enum LCU {
                             gamesRequired: redemption?.required)
     }
 
+    // MARK: Behaviour penalties
+    //
+    // Endpoint names recovered from the client's own /help catalogue. The field names
+    // below come from its published type definitions:
+    //   LolLeaverBusterLeaverBusterNotification { punishedGamesRemaining,
+    //       hasActivePenalty, queueLockoutTimerExpiryUtcMillis, punishmentTimerType }
+    //   lowPriorityData { penaltyTime, penaltyTimeRemaining, penalizedSummonerIds }
+
+    struct BehaviourSnapshot {
+        var honor: HonorProfile?
+        var lowPriorityPenaltySeconds: Double?
+        var punishedGamesRemaining: Int?
+        var lockoutExpiry: Date?
+        var hasActivePenalty = false
+        var reformCard: String?
+    }
+
+    static func behaviour(credentials: LCUCredentials) async -> BehaviourSnapshot {
+        var snapshot = BehaviourSnapshot()
+        snapshot.honor = await honor(credentials: credentials)
+
+        if let data = try? await request("GET", "/lol-leaver-buster/v1/notifications", credentials: credentials) {
+            let parsed = parseLeaverNotifications(data)
+            snapshot.punishedGamesRemaining = parsed.games
+            snapshot.lockoutExpiry = parsed.lockout
+            snapshot.hasActivePenalty = parsed.active
+        }
+
+        // The queue-delay timer lives on the matchmaking resource, not leaver-buster.
+        if let data = try? await request("GET", "/lol-lobby-team-builder/v1/matchmaking", credentials: credentials) {
+            snapshot.lowPriorityPenaltySeconds = parseLowPriority(data)
+        }
+
+        for path in ["/lol-player-behavior/v1/reform-card", "/lol-player-behavior/v2/reform-card"] {
+            guard let data = try? await request("GET", path, credentials: credentials),
+                  let summary = parseReformCard(data) else { continue }
+            snapshot.reformCard = summary
+            break
+        }
+        return snapshot
+    }
+
+    static func parseLeaverNotifications(_ data: Data) -> (games: Int?, lockout: Date?, active: Bool) {
+        struct DTO: Decodable {
+            let punishedGamesRemaining: Int?
+            let hasActivePenalty: Bool?
+            let queueLockoutTimerExpiryUtcMillis: Double?
+        }
+        let items: [DTO]
+        if let list = try? JSONDecoder().decode([DTO].self, from: data) {
+            items = list
+        } else if let one = try? JSONDecoder().decode(DTO.self, from: data) {
+            items = [one]
+        } else {
+            return (nil, nil, false)
+        }
+
+        var games: Int?
+        var lockout: Date?
+        var active = false
+        for item in items {
+            if let n = item.punishedGamesRemaining, n > 0 { games = max(games ?? 0, n) }
+            if let millis = item.queueLockoutTimerExpiryUtcMillis, millis > 0 {
+                lockout = Date(timeIntervalSince1970: millis / 1000)
+            }
+            if item.hasActivePenalty == true { active = true }
+        }
+        return (games, lockout, active)
+    }
+
+    /// `penaltyTimeRemaining` counts down; `penaltyTime` is the sentence length.
+    static func parseLowPriority(_ data: Data) -> Double? {
+        struct DTO: Decodable {
+            struct LowPriority: Decodable {
+                let penaltyTime: Double?
+                let penaltyTimeRemaining: Double?
+            }
+            let lowPriorityData: LowPriority?
+        }
+        guard let dto = try? JSONDecoder().decode(DTO.self, from: data),
+              let low = dto.lowPriorityData else { return nil }
+        if let remaining = low.penaltyTimeRemaining, remaining > 0 { return remaining }
+        if let total = low.penaltyTime, total > 0 { return total }
+        return nil
+    }
+
+    /// The reform card's shape is not published; summarise whatever it carries.
+    static func parseReformCard(_ data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var parts: [String] = []
+        for key in ["punishment", "punishmentType", "restrictionType", "reason", "status", "state"] {
+            if let value = object[key] as? String, !value.isEmpty { parts.append(value) }
+        }
+        if let games = object["gamesRemaining"] as? Int, games > 0 { parts.append("\(games) games remaining") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// Turns the honor profile into penalty records the vault can hold.
-    static func penalties(from honor: HonorProfile) -> [Penalty] {
+    static func penalties(from snapshot: BehaviourSnapshot) -> [Penalty] {
+        var result: [Penalty] = []
+        if let honor = snapshot.honor { result += penalties(from: honor) }
+
+        // Queue delay: a live countdown in seconds.
+        if let seconds = snapshot.lowPriorityPenaltySeconds, seconds > 0 {
+            let minutes = Int((seconds / 60).rounded())
+            result.append(Penalty(
+                source: .client,
+                kind: .queueDelay,
+                detail: "\(minutes) minute\(minutes == 1 ? "" : "s") added to each queue",
+                startedAt: Date(),
+                expiresAt: Date().addingTimeInterval(seconds)
+            ))
+        }
+
+        // Low-priority queue served off in games rather than time.
+        if let games = snapshot.punishedGamesRemaining, games > 0 {
+            result.append(Penalty(
+                source: .client,
+                kind: .lowPriorityQueue,
+                detail: "\(games) game\(games == 1 ? "" : "s") remaining",
+                startedAt: Date(),
+                expiresAt: nil
+            ))
+        }
+
+        if let lockout = snapshot.lockoutExpiry, lockout > Date() {
+            result.append(Penalty(
+                source: .client,
+                kind: .queueDelay,
+                detail: "Queue lockout",
+                startedAt: Date(),
+                expiresAt: lockout
+            ))
+        }
+
+        if let card = snapshot.reformCard {
+            result.append(Penalty(
+                source: .client,
+                kind: .chatRestriction,
+                detail: card,
+                startedAt: Date(),
+                expiresAt: nil
+            ))
+        }
+
+        // The client shows "Team voice muted — Low Honor" with no countdown of its own,
+        // so it is a consequence of the honor level rather than a separate record.
+        if let level = snapshot.honor?.level, level <= 2 {
+            result.append(Penalty(
+                source: .client,
+                kind: .voiceMuted,
+                detail: "Low honor (Honor \(level)) — inferred, the client publishes no endpoint for this",
+                startedAt: Date(),
+                expiresAt: nil
+            ))
+        }
+        return result
+    }
+
+    private static func penalties(from honor: HonorProfile) -> [Penalty] {
         var result: [Penalty] = []
         if let remaining = honor.gamesRemaining, remaining > 0 {
             let total = honor.gamesRequired.map { " of \($0)" } ?? ""

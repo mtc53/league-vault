@@ -788,7 +788,7 @@ struct ClientSheet: View {
             for entry in snapshot.ranks { account.setRank(entry) }
             if let honor = snapshot.honor {
                 account.honorLevel = honor.level
-                account.replaceClientPenalties(with: LCU.penalties(from: honor))
+                account.replaceClientPenalties(with: LCU.penalties(from: snapshot.behaviour ?? LCU.BehaviourSnapshot(honor: honor)))
             }
             if let game = snapshot.lastGame { account.lastGame = game }
             if !snapshot.champions.isEmpty { account.ownedChampions = snapshot.champions }

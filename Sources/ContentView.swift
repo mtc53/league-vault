@@ -488,7 +488,7 @@ struct ContentView: View {
         if let honor = snapshot.honor {
             current.honorLevel = honor.level
             // Only client-reported penalties are replaced; hand-entered ones stay.
-            current.replaceClientPenalties(with: LCU.penalties(from: honor))
+            current.replaceClientPenalties(with: LCU.penalties(from: snapshot.behaviour ?? LCU.BehaviourSnapshot(honor: honor)))
         }
         current.lastRefreshed = Date()
         store.update(current)
