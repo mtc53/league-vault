@@ -49,8 +49,11 @@ field for anything you want to set by hand.
 ## Activity
 
 Each sidebar row carries a badge with how many games the account has played in the last
-three months — `12 in 3mo`, or a grey `no games in 3mo` for a dormant one. Accounts that
-have never been counted show no badge at all rather than a misleading zero.
+three months — `12 in 3mo`, or a grey `no games in 3mo` for a dormant one. An account
+that has never been counted shows a dashed `? in 3mo` instead: the badge is visible so
+the feature is not invisible, but it never fabricates a zero for something it has not
+measured. Refresh the account with the client signed in to it and the real number
+replaces it.
 
 The count comes from the client's match history, walked a page at a time and stopped as
 soon as it passes the ninety-day mark, so it does not read a whole history to answer the

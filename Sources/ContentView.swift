@@ -755,22 +755,38 @@ struct AccountRow: View {
                                          : account.soloRank.tier.color)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    if let label = account.recentGamesLabel {
-                        // Activity over the last three months, so a dormant smurf is
-                        // obvious without opening it.
-                        Text(label)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(account.isDormant ? Color.secondary : Color.accentColor)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(
-                                Capsule().fill((account.isDormant ? Color.secondary : Color.accentColor)
-                                    .opacity(0.15))
-                            )
-                            .help(account.recentGamesAsOf.map {
-                                "Games in the last 3 months, counted \($0.relativeDisplay)"
-                            } ?? "Games in the last 3 months")
+                    // Activity over the last three months, so a dormant smurf is obvious
+                    // without opening it. Shown dimmed before it has ever been counted,
+                    // rather than hidden — otherwise the badge looks missing — and never
+                    // as a fabricated zero.
+                    Group {
+                        if let label = account.recentGamesLabel {
+                            Text(label)
+                                .foregroundStyle(account.isDormant ? Color.secondary : Color.accentColor)
+                                .background(
+                                    Capsule().fill((account.isDormant ? Color.secondary : Color.accentColor)
+                                        .opacity(0.15))
+                                        .padding(.horizontal, -5)
+                                        .padding(.vertical, -1)
+                                )
+                        } else {
+                            Text("? in 3mo")
+                                .foregroundStyle(.tertiary)
+                                .background(
+                                    Capsule().strokeBorder(Color.secondary.opacity(0.35),
+                                                           style: StrokeStyle(lineWidth: 1, dash: [2]))
+                                        .padding(.horizontal, -5)
+                                        .padding(.vertical, -1)
+                                )
+                        }
                     }
+                    .font(.system(size: 9, weight: .semibold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .help(account.recentGames == nil
+                          ? "Games in the last 3 months — refresh this account with the client signed in to count them"
+                          : (account.recentGamesAsOf.map { "Games in the last 3 months, counted \($0.relativeDisplay)" }
+                             ?? "Games in the last 3 months"))
                 }
             }
 
