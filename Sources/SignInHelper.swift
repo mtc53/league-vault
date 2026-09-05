@@ -16,6 +16,10 @@ struct SignInHelperSheet: View {
     @State private var countdown = 0
     @State private var filling = false
     @State private var permitted = Autofill.isPermitted
+    @State private var selfTestField = ""
+    @State private var selfTestCountdown = 0
+    @State private var selfTestResult: String?
+    @FocusState private var selfTestFocused: Bool
 
     enum Step { case start, clientReady, usernameCopied, passwordCopied }
 
@@ -50,6 +54,8 @@ struct SignInHelperSheet: View {
                     stepTwo
                     Divider()
                     stepThree
+                    Divider()
+                    selfTest
                     Divider()
                     note
                 }
@@ -301,6 +307,64 @@ struct SignInHelperSheet: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
+            }
+        }
+    }
+
+    /// Types into a field inside this very window. Posting synthetic key events needs
+    /// the same Accessibility permission whatever the target, so if text lands here the
+    /// permission is genuinely working and any failure is about focus or the client.
+    private var selfTest: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Self-test")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Press Test, then click the box. If “autofill-ok” appears, keystroke permission is working and the problem is which window or field is focused — not permission.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button(selfTestCountdown > 0 ? "Typing in \(selfTestCountdown)…" : "Test") {
+                    selfTestField = ""
+                    selfTestResult = nil
+                    selfTestFocused = true
+                    selfTestCountdown = 2
+                    Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+                        Task { @MainActor in
+                            selfTestCountdown -= 1
+                            guard selfTestCountdown <= 0 else { return }
+                            timer.invalidate()
+                            DispatchQueue.global(qos: .userInitiated).async {
+                                Autofill.type("autofill-ok")
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                                    selfTestResult = selfTestField.contains("autofill-ok")
+                                        ? "Keystrokes work. Permission is fine — if the client stays empty, the field there was not focused."
+                                        : "No keystrokes arrived. macOS is blocking them: remove League Vault from Accessibility with −, add it again, and retry."
+                                }
+                            }
+                        }
+                    }
+                }
+                .disabled(selfTestCountdown > 0)
+
+                TextField("click here", text: $selfTestField)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: 160)
+                    .focused($selfTestFocused)
+
+                Text(permitted ? "AXIsProcessTrusted: yes" : "AXIsProcessTrusted: no")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(permitted ? .green : .orange)
+                Spacer()
+            }
+
+            if let selfTestResult {
+                Text(selfTestResult)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(selfTestResult.hasPrefix("Keystrokes work") ? .green : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
