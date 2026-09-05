@@ -406,10 +406,14 @@ struct ClientSheet: View {
 
                 if let scan, !scan.withData.isEmpty || !scan.empty.isEmpty {
                     Button("Copy all") {
-                        var text = "help catalogue: \(scan.helpWorked ? "\(scan.catalogueSize) paths" : "unavailable")\n"
+                        var text = "catalogue: \(scan.helpWorked ? "\(scan.catalogueSize) matching paths" : "unavailable")\n"
+                        text += scan.catalogueLog.map { "  " + $0 }.joined(separator: "\n") + "\n\n"
                         text += scan.withData.map { "=== \($0.path) ===\n\($0.body)" }.joined(separator: "\n\n")
                         if !scan.empty.isEmpty {
-                            text += "\n\n=== answered but empty ===\n" + scan.empty.joined(separator: "\n")
+                            text += "\n\n=== exists but empty ===\n" + scan.empty.joined(separator: "\n")
+                        }
+                        if !scan.missing.isEmpty {
+                            text += "\n\n=== not present ===\n" + scan.missing.joined(separator: "\n")
                         }
                         Clipboard.copy(text)
                         toast = "Copied \(scan.withData.count) responses."
@@ -421,11 +425,19 @@ struct ClientSheet: View {
             }
 
             if let scan {
-                Text(scan.helpWorked
-                     ? "Catalogue: \(scan.catalogueSize) matching paths from /help."
-                     : "The /help catalogue was unavailable — only the known paths were tried.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(scan.helpWorked
+                         ? "Catalogue: \(scan.catalogueSize) matching paths."
+                         : "No catalogue answered — only the known paths were tried.")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(scan.catalogueLog, id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if scanned, let scan, scan.withData.isEmpty {
@@ -436,10 +448,15 @@ struct ClientSheet: View {
             }
 
             if let scan, !scan.empty.isEmpty {
-                Text("Answered but empty: " + scan.empty.joined(separator: ", "))
-                    .font(.system(size: 10, design: .monospaced))
+                Text("Exists but empty: " + scan.empty.joined(separator: ", "))
+                    .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let scan, !scan.missing.isEmpty {
+                Text("Not present: \(scan.missing.count) paths")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
 
             if let scan, !scan.withData.isEmpty {

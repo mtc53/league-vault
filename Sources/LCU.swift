@@ -104,12 +104,14 @@ enum LCU {
     private static func request(_ method: String,
                                 _ path: String,
                                 body: [String: Any]? = nil,
+                                timeout: TimeInterval = 10,
                                 credentials: LCUCredentials) async throws -> Data {
         guard let url = URL(string: credentials.baseURL + path) else {
             throw LCUError(message: "Bad LCU path \(path)")
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = timeout
         request.setValue(credentials.authorizationHeader, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
@@ -338,16 +340,60 @@ enum LCU {
                               credentials: credentials)
     }
 
+    struct ProbeResult {
+        let path: String
+        let status: Int      // 0 when the request never completed
+        let body: String
+        var exists: Bool { status != 404 && status != 0 }
+        var hasData: Bool {
+            guard status == 200 else { return false }
+            let t = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !t.isEmpty && t != "[]" && t != "{}" && t != "null"
+        }
+    }
+
+    static func probeStatus(_ path: String, credentials: LCUCredentials, timeout: TimeInterval = 10) async -> ProbeResult {
+        guard let url = URL(string: credentials.baseURL + (path.hasPrefix("/") ? path : "/" + path)) else {
+            return ProbeResult(path: path, status: 0, body: "bad path")
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.setValue(credentials.authorizationHeader, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            return ProbeResult(path: path, status: status,
+                               body: String(data: data, encoding: .utf8) ?? "\(data.count) bytes")
+        } catch {
+            return ProbeResult(path: path, status: 0, body: error.localizedDescription)
+        }
+    }
+
     // MARK: Endpoint discovery
 
     /// The client publishes its own API catalogue at /help. Rather than hard-coding a
     /// guess at where behaviour penalties live, ask the client and filter.
-    static func discoverEndpoints(matching keywords: [String], credentials: LCUCredentials) async -> [String] {
+    /// Every catalogue the client is known to publish, cheapest first.
+    static let cataloguePaths = [
+        "/swagger/v3/openapi.json",
+        "/swagger/v2/swagger.json",
+        "/help?format=Full",
+        "/help",
+        "/Help"
+    ]
+
+    static func discoverEndpoints(matching keywords: [String],
+                                  credentials: LCUCredentials,
+                                  log: ((String) -> Void)? = nil) async -> [String] {
         var text: String?
-        for path in ["/help?format=Full", "/help"] {
-            if let data = try? await request("GET", path, credentials: credentials) {
-                text = String(data: data, encoding: .utf8)
-                if text?.isEmpty == false { break }
+        for path in cataloguePaths {
+            // These payloads run to megabytes; the 10s default was cutting them off.
+            let probe = await probeStatus(path, credentials: credentials, timeout: 120)
+            log?("\(path) → HTTP \(probe.status), \(probe.body.count) bytes")
+            if probe.status == 200, probe.body.count > 200 {
+                text = probe.body
+                break
             }
         }
         guard let text else { return [] }
@@ -372,6 +418,8 @@ enum LCU {
     struct BehaviourScan {
         var withData: [(path: String, body: String)] = []
         var empty: [String] = []
+        var missing: [String] = []
+        var catalogueLog: [String] = []
         var catalogueSize = 0
         var helpWorked = false
     }
@@ -384,11 +432,24 @@ enum LCU {
         "dodge", "gatekeep", "chat-restrict", "matchmaking"
     ]
 
+    /// Plausible homes for the Behaviour Standing panel. A 404 here is still useful:
+    /// it rules a plugin out.
     static let behaviourFallbackPaths = [
         "/lol-honor-v2/v1/profile",
         "/lol-honor-v2/v1/rewards",
+        "/lol-honor-v2/v1/penalties",
+        "/lol-honor-v2/v1/standing",
         "/lol-leaver-buster/v1/notifications",
+        "/lol-leaver-buster/v1/state",
         "/lol-player-behavior/v1/restrictions",
+        "/lol-player-behavior/v1/behavior-standing",
+        "/lol-player-behavior/v1/penalties",
+        "/lol-reputation/v1/standing",
+        "/lol-reputation/v1/penalties",
+        "/lol-reputation/v1/profile",
+        "/lol-restriction/v1/restrictions",
+        "/lol-penalties/v1/penalties",
+        "/lol-behaviour/v1/standing",
         "/lol-matchmaking/v1/search",
         "/lol-premade-voice/v1/settings",
         "/lol-gameflow/v1/gameflow-metadata/player-status",
@@ -398,21 +459,23 @@ enum LCU {
     /// Everything the client will tell us about behaviour, honor and restrictions.
     static func scanBehaviourEndpoints(credentials: LCUCredentials) async -> BehaviourScan {
         var scan = BehaviourScan()
-        var paths = await discoverEndpoints(matching: behaviourKeywords, credentials: credentials)
+        var log: [String] = []
+        var paths = await discoverEndpoints(matching: behaviourKeywords,
+                                            credentials: credentials) { log.append($0) }
+        scan.catalogueLog = log
         scan.catalogueSize = paths.count
         scan.helpWorked = !paths.isEmpty
 
         for path in behaviourFallbackPaths where !paths.contains(path) { paths.append(path) }
 
         for path in paths {
-            guard let data = try? await request("GET", path, credentials: credentials),
-                  var body = String(data: data, encoding: .utf8) else { continue }
-            body = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            if body.isEmpty || body == "[]" || body == "{}" || body == "null" {
-                // An endpoint that exists but is empty is still worth knowing about.
-                scan.empty.append(path)
+            let probe = await probeStatus(path, credentials: credentials)
+            if probe.hasData {
+                scan.withData.append((path, probe.body.trimmingCharacters(in: .whitespacesAndNewlines)))
+            } else if probe.exists {
+                scan.empty.append("\(path) [HTTP \(probe.status)]")
             } else {
-                scan.withData.append((path, body))
+                scan.missing.append("\(path) [\(probe.status == 0 ? "no response" : "404")]")
             }
         }
         return scan
