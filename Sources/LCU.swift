@@ -335,6 +335,28 @@ enum LCU {
                               credentials: credentials)
     }
 
+    // MARK: Challenges
+
+    /// What a challenge reset managed to clear.
+    struct ChallengeReset {
+        var badgesCleared = false
+        var titleCleared = false
+        var bannerCleared = false
+        var allSucceeded: Bool { badgesCleared && titleCleared && bannerCleared }
+    }
+
+    /// Empties the three challenge tokens shown under your name, the challenge title,
+    /// and the banner accent. Each is a separate call so one rejection does not sink
+    /// the others.
+    static func clearChallenges(credentials: LCUCredentials) async -> ChallengeReset {
+        let path = "/lol-challenges/v1/update-player-preferences/"
+        var result = ChallengeReset()
+        result.badgesCleared = (try? await request("POST", path, body: ["challengeIds": []], credentials: credentials)) != nil
+        result.titleCleared = (try? await request("POST", path, body: ["title": ""], credentials: credentials)) != nil
+        result.bannerCleared = (try? await request("POST", path, body: ["bannerAccent": ""], credentials: credentials)) != nil
+        return result
+    }
+
     // MARK: Friends
 
     struct Friend: Identifiable, Hashable {

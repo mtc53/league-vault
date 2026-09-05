@@ -321,6 +321,38 @@ struct OwnedChampion: Codable, Hashable, Identifiable, Comparable {
     }
 }
 
+// MARK: - Quick prep
+
+enum QuickPrep {
+    /// The dark-elf icon with the red tear streaks, found by matching the catalogue.
+    static let defaultIconId = 6923
+
+    private enum Keys {
+        static let icon = "prepIconId"
+        static let setIcon = "prepSetIcon"
+        static let clearChallenges = "prepClearChallenges"
+        static let removeFriends = "prepRemoveFriends"
+    }
+
+    static var iconId: Int {
+        get { UserDefaults.standard.object(forKey: Keys.icon) as? Int ?? defaultIconId }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.icon) }
+    }
+    static var setsIcon: Bool {
+        get { UserDefaults.standard.object(forKey: Keys.setIcon) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.setIcon) }
+    }
+    static var clearsChallenges: Bool {
+        get { UserDefaults.standard.object(forKey: Keys.clearChallenges) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.clearChallenges) }
+    }
+    /// Off by default: removing friends cannot be undone.
+    static var removesFriends: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.removeFriends) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.removeFriends) }
+    }
+}
+
 // MARK: - Access level
 
 /// Whether the original registration email came with the account.

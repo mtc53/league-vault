@@ -43,6 +43,53 @@ final class ClientModel: ObservableObject {
         }
     }
 
+    /// Icon, challenge reset, and optionally friends — in one pass.
+    func runQuickPrep(setIcon: Bool, iconId: Int, clearChallenges: Bool, removeFriends: Bool) async -> [String] {
+        guard let credentials else { return ["Not connected to the client."] }
+        busy = true
+        defer { busy = false; friendProgress = nil }
+
+        var report: [String] = []
+
+        if setIcon {
+            friendProgress = "Setting profile icon…"
+            do {
+                try await LCU.setProfileIcon(id: iconId, credentials: credentials)
+                report.append("Icon set to \(iconId).")
+            } catch {
+                report.append("Icon failed: \(error.localizedDescription)")
+            }
+        }
+
+        if clearChallenges {
+            friendProgress = "Clearing challenge badges…"
+            let reset = await LCU.clearChallenges(credentials: credentials)
+            if reset.allSucceeded {
+                report.append("Challenge badges, title and banner cleared.")
+            } else {
+                var done: [String] = []
+                if reset.badgesCleared { done.append("badges") }
+                if reset.titleCleared { done.append("title") }
+                if reset.bannerCleared { done.append("banner") }
+                report.append(done.isEmpty
+                    ? "Challenge reset was refused by the client."
+                    : "Cleared \(done.joined(separator: ", ")); the rest was refused.")
+            }
+        }
+
+        if removeFriends {
+            let result = await LCU.removeAllFriends(credentials: credentials) { done, total in
+                self.friendProgress = "Removing friend \(done) of \(total)…"
+            }
+            report.append(result.failed == 0
+                ? "Removed \(result.removed) friends."
+                : "Removed \(result.removed) friends, \(result.failed) failed.")
+        }
+
+        await probe()
+        return report
+    }
+
     func removeAllFriends() async -> (removed: Int, failed: Int) {
         guard let credentials else { return (0, 0) }
         busy = true
@@ -85,6 +132,12 @@ struct ClientSheet: View {
     @State private var probing = false
     @State private var confirmRemoveFriends = false
     @State private var showIconPicker = false
+    @State private var prepSetIcon = QuickPrep.setsIcon
+    @State private var prepIconId = QuickPrep.iconId
+    @State private var prepClearChallenges = QuickPrep.clearsChallenges
+    @State private var prepRemoveFriends = QuickPrep.removesFriends
+    @State private var confirmPrep = false
+    @State private var prepReport: [String] = []
 
     /// The vault entry, if any, that matches the signed-in account.
     private var linkedAccount: Account? {
@@ -127,6 +180,8 @@ struct ClientSheet: View {
                         Divider()
                         vaultBlock(me)
                         Divider()
+                        quickPrepBlock
+                        Divider()
                         friendsBlock
                         Divider()
                         diagnosticsBlock
@@ -161,6 +216,8 @@ struct ClientSheet: View {
             if let credentials = model.credentials {
                 IconPickerSheet(credentials: credentials,
                                 currentIconId: model.summoner?.profileIconId) { applied in
+                    prepIconId = applied
+                    QuickPrep.iconId = applied
                     toast = "Profile icon set to \(applied)."
                     Task { await model.probe() }
                 }
@@ -308,6 +365,107 @@ struct ClientSheet: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private var prepSummary: [String] {
+        var steps: [String] = []
+        if prepSetIcon { steps.append("set the profile icon to \(prepIconId)") }
+        if prepClearChallenges { steps.append("clear the challenge badges, title and banner") }
+        if prepRemoveFriends { steps.append("remove all \(model.friends.count) friends — permanently") }
+        return steps
+    }
+
+    private var quickPrepBlock: some View {
+        FormSection("Quick prep") {
+            Text("One button to make an account look untouched.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 12) {
+                ProfileIconView(iconId: prepSetIcon ? prepIconId : model.summoner?.profileIconId,
+                                initials: "?", tint: .accentColor, size: 46, corner: 9)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Toggle("Set profile icon", isOn: $prepSetIcon)
+                            .toggleStyle(.checkbox)
+                        TextField("6923", value: $prepIconId, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 70)
+                            .disabled(!prepSetIcon)
+                        Button("Pick…") { showIconPicker = true }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11))
+                            .disabled(!prepSetIcon)
+                    }
+
+                    Toggle("Clear challenge badges, title and banner", isOn: $prepClearChallenges)
+                        .toggleStyle(.checkbox)
+
+                    Toggle(model.friends.isEmpty
+                           ? "Remove all friends"
+                           : "Remove all \(model.friends.count) friends",
+                           isOn: $prepRemoveFriends)
+                        .toggleStyle(.checkbox)
+                        .foregroundStyle(prepRemoveFriends ? Color.orange : Color.primary)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    confirmPrep = true
+                } label: {
+                    if model.busy {
+                        ProgressView().controlSize(.small).scaleEffect(0.7)
+                    } else {
+                        Label("Run Quick Prep", systemImage: "wand.and.stars")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.busy || prepSummary.isEmpty)
+
+                if let progress = model.friendProgress {
+                    Text(progress).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            if !prepReport.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(prepReport, id: \.self) { line in
+                        Label(line, systemImage: "checkmark.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if prepRemoveFriends {
+                Text("Friend removal cannot be undone. Everything else here can be set back by hand.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onChange(of: prepSetIcon) { _, v in QuickPrep.setsIcon = v }
+        .onChange(of: prepIconId) { _, v in QuickPrep.iconId = v }
+        .onChange(of: prepClearChallenges) { _, v in QuickPrep.clearsChallenges = v }
+        .onChange(of: prepRemoveFriends) { _, v in QuickPrep.removesFriends = v }
+        .alert("Run quick prep on \(model.summoner?.riotID ?? "this account")?", isPresented: $confirmPrep) {
+            Button("Cancel", role: .cancel) { }
+            Button(prepRemoveFriends ? "Run — removes friends" : "Run",
+                   role: prepRemoveFriends ? .destructive : nil) {
+                Task {
+                    prepReport = await model.runQuickPrep(setIcon: prepSetIcon,
+                                                          iconId: prepIconId,
+                                                          clearChallenges: prepClearChallenges,
+                                                          removeFriends: prepRemoveFriends)
+                }
+            }
+        } message: {
+            Text("This will " + prepSummary.joined(separator: ", then ") + ".")
         }
     }
 

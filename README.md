@@ -77,6 +77,28 @@ Keys are matched case-insensitively across `lol_blue_essence` / `blueEssence` /
 numbers, doubles or strings. If every shape fails, the client sheet shows a **wallet
 unavailable** chip rather than silently showing nothing.
 
+## Quick prep
+
+One button in the **League Client** sheet that makes an account look untouched. Each
+step is a toggle, and the choices are remembered:
+
+| Step | Default | Call |
+|---|---|---|
+| Set the profile icon | on, icon **6923** | `PUT /lol-summoner/v1/current-summoner/icon` |
+| Clear challenge badges, title and banner | on | `POST /lol-challenges/v1/update-player-preferences/` ×3 |
+| Remove all friends | **off** | `DELETE /lol-chat/v1/friends/{pid}` per friend |
+
+Icon 6923 is the dark-elf icon with the red tear streaks. Change it in the field or
+with **Pick…**, and quick prep remembers the new one.
+
+The challenge reset sends `challengeIds: []`, `title: ""` and `bannerAccent: ""` as three
+separate calls, so one rejection does not sink the others — the report says which parts
+went through.
+
+Friend removal stays off by default and is the only irreversible step; when it is on the
+confirmation button turns destructive and names the count. Everything else can be set
+back by hand.
+
 ## Profile icons
 
 The **League Client** sheet has **Change icon…** next to the Riot ID. It browses every
@@ -144,6 +166,28 @@ Every account with a full Riot ID gets a u.gg profile link
 - **Copy u.gg** button in the detail header
 - Right-click a row → **Copy u.gg Link** / **Open on u.gg**
 - The overflow (•••) menu has both as well
+
+## Quick prep
+
+One button in the **League Client** sheet that makes an account look untouched. Each
+step is a toggle, and the choices are remembered:
+
+| Step | Default | Call |
+|---|---|---|
+| Set the profile icon | on, icon **6923** | `PUT /lol-summoner/v1/current-summoner/icon` |
+| Clear challenge badges, title and banner | on | `POST /lol-challenges/v1/update-player-preferences/` ×3 |
+| Remove all friends | **off** | `DELETE /lol-chat/v1/friends/{pid}` per friend |
+
+Icon 6923 is the dark-elf icon with the red tear streaks. Change it in the field or
+with **Pick…**, and quick prep remembers the new one.
+
+The challenge reset sends `challengeIds: []`, `title: ""` and `bannerAccent: ""` as three
+separate calls, so one rejection does not sink the others — the report says which parts
+went through.
+
+Friend removal stays off by default and is the only irreversible step; when it is on the
+confirmation button turns destructive and names the count. Everything else can be set
+back by hand.
 
 ## Profile icons
 
