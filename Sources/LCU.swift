@@ -684,11 +684,121 @@ enum LCU {
         var lockoutExpiry: Date?
         var hasActivePenalty = false
         var reformCard: String?
+        var restrictions: [Penalty] = []
+        var voiceChatRestricted = false
+        var textChatRestricted = false
+    }
+
+    /// GET /lol-summoner-profiles/v1/get-restriction-view
+    ///
+    /// ```
+    /// {"restrictions":[{"restrictionType":"QUEUE_DELAY",
+    ///                   "restrictionReason":"AWAY_FROM_KEYBOARD",
+    ///                   "restrictionsMillis":600000,
+    ///                   "expirationData":{"expirationMillis":0,
+    ///                     "redemptions":[{"redemptionCountRemaining":3,
+    ///                                     "redemptionCountRequired":5,
+    ///                                     "redemptionEventType":"MATCHMADE_GAME_PLAYED"}]}}]}
+    /// ```
+    static func parseRestrictions(_ data: Data) -> [Penalty] {
+        struct DTO: Decodable {
+            struct Restriction: Decodable {
+                struct Expiration: Decodable {
+                    struct Redemption: Decodable {
+                        let redemptionCountRemaining: Int?
+                        let redemptionCountRequired: Int?
+                        let redemptionEventType: String?
+                    }
+                    let expirationMillis: Double?
+                    let redemptions: [Redemption]?
+                }
+                let restrictionType: String?
+                let restrictionReason: String?
+                let restrictionsMillis: Double?
+                let expirationData: Expiration?
+            }
+            let restrictions: [Restriction]?
+        }
+        guard let dto = try? JSONDecoder().decode(DTO.self, from: data),
+              let list = dto.restrictions else { return [] }
+
+        var result: [Penalty] = []
+        for restriction in list {
+            let type = (restriction.restrictionType ?? "").uppercased()
+            let redemption = restriction.expirationData?.redemptions?.first
+
+            var parts: [String] = []
+            // restrictionsMillis is the size of the penalty, e.g. a 10-minute delay.
+            if let millis = restriction.restrictionsMillis, millis > 0 {
+                let minutes = Int((millis / 60_000).rounded())
+                parts.append("\(minutes) minute\(minutes == 1 ? "" : "s")")
+            }
+            if let remaining = redemption?.redemptionCountRemaining, remaining > 0 {
+                if let required = redemption?.redemptionCountRequired, required > 0 {
+                    parts.append("\(remaining) of \(required) games remaining")
+                } else {
+                    parts.append("\(remaining) games remaining")
+                }
+            }
+            if let reason = restriction.restrictionReason, !reason.isEmpty, reason != "NONE" {
+                parts.append(humanise(reason))
+            }
+
+            // Nothing left to serve: not an active penalty.
+            let remaining = redemption?.redemptionCountRemaining ?? 0
+            let expiry = restriction.expirationData?.expirationMillis ?? 0
+            if remaining <= 0 && expiry <= 0 && (restriction.restrictionsMillis ?? 0) <= 0 { continue }
+
+            result.append(Penalty(
+                source: .client,
+                kind: kind(forRestrictionType: type),
+                detail: parts.isEmpty ? humanise(type) : parts.joined(separator: " · "),
+                startedAt: Date(),
+                expiresAt: expiry > 0 ? Date(timeIntervalSince1970: expiry / 1000) : nil
+            ))
+        }
+        return result
+    }
+
+    private static func kind(forRestrictionType type: String) -> PenaltyKind {
+        switch true {
+        case type.contains("QUEUE_DELAY"):      return .queueDelay
+        case type.contains("REPUTATION"):       return .honorDowngrade
+        case type.contains("LOW_PRIORITY"),
+             type.contains("LEAVER"):           return .lowPriorityQueue
+        case type.contains("VOICE"):            return .voiceMuted
+        case type.contains("CHAT"),
+             type.contains("COMMUNICATION"):    return .chatRestriction
+        case type.contains("RANKED"):           return .rankedRestriction
+        case type.contains("PERMANENT"):        return .permanentBan
+        case type.contains("BAN"),
+             type.contains("SUSPEN"):           return .suspension
+        default:                                return .other
+        }
+    }
+
+    /// AWAY_FROM_KEYBOARD -> "Away from keyboard"
+    private static func humanise(_ raw: String) -> String {
+        let words = raw.replacingOccurrences(of: "_", with: " ").lowercased()
+        return words.prefix(1).uppercased() + words.dropFirst()
     }
 
     static func behaviour(credentials: LCUCredentials) async -> BehaviourSnapshot {
         var snapshot = BehaviourSnapshot()
         snapshot.honor = await honor(credentials: credentials)
+
+        // The Behaviour Standing panel itself. Everything it renders is here, with
+        // real numbers, whether or not you are queued.
+        if let data = try? await request("GET", "/lol-summoner-profiles/v1/get-restriction-view", credentials: credentials) {
+            snapshot.restrictions = parseRestrictions(data)
+        }
+
+        // A genuine voice-restriction flag, rather than an inference from honor.
+        if let data = try? await request("GET", "/lol-premade-voice/v1/parental-controls-status", credentials: credentials),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            snapshot.voiceChatRestricted = object["isVoiceChatRestricted"] as? Bool ?? false
+            snapshot.textChatRestricted = object["isTextChatRestricted"] as? Bool ?? false
+        }
 
         if let data = try? await request("GET", "/lol-leaver-buster/v1/notifications", credentials: credentials) {
             let parsed = parseLeaverNotifications(data)
@@ -769,7 +879,23 @@ enum LCU {
     /// Turns the honor profile into penalty records the vault can hold.
     static func penalties(from snapshot: BehaviourSnapshot) -> [Penalty] {
         var result: [Penalty] = []
-        if let honor = snapshot.honor { result += penalties(from: honor) }
+
+        // The restriction view is authoritative — it carries the same rows the client
+        // renders. Only fall back to deriving one from honor when it is unavailable.
+        result += snapshot.restrictions
+        let haveReputationRow = snapshot.restrictions.contains { $0.kind == .honorDowngrade }
+        if !haveReputationRow, let honor = snapshot.honor {
+            result += penalties(from: honor)
+        }
+
+        if snapshot.voiceChatRestricted {
+            result.append(Penalty(source: .client, kind: .voiceMuted,
+                                  detail: "Voice chat restricted", startedAt: Date()))
+        }
+        if snapshot.textChatRestricted {
+            result.append(Penalty(source: .client, kind: .chatRestriction,
+                                  detail: "Text chat restricted", startedAt: Date()))
+        }
 
         // Queue delay: a live countdown in seconds.
         if let seconds = snapshot.lowPriorityPenaltySeconds, seconds > 0 {
@@ -814,9 +940,10 @@ enum LCU {
             ))
         }
 
-        // The client shows "Team voice muted — Low Honor" with no countdown of its own,
-        // so it is a consequence of the honor level rather than a separate record.
-        if let level = snapshot.honor?.level, level <= 2 {
+        // "Team voice muted — Low Honor" has no row of its own in the restriction view
+        // and no countdown, so below Honor 3 it is inferred — unless the voice service
+        // already reported a real restriction above.
+        if !snapshot.voiceChatRestricted, let level = snapshot.honor?.level, level <= 2 {
             result.append(Penalty(
                 source: .client,
                 kind: .voiceMuted,
