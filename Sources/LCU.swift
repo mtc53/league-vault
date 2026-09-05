@@ -383,35 +383,80 @@ enum LCU {
         "/Help"
     ]
 
-    static func discoverEndpoints(matching keywords: [String],
-                                  credentials: LCUCredentials,
-                                  log: ((String) -> Void)? = nil) async -> [String] {
-        var text: String?
+    /// The catalogue is megabytes; fetch it once per session.
+    private static var catalogueCache: String?
+
+    static func catalogue(credentials: LCUCredentials, log: ((String) -> Void)? = nil) async -> String? {
+        if let catalogueCache { return catalogueCache }
         for path in cataloguePaths {
             // These payloads run to megabytes; the 10s default was cutting them off.
             let probe = await probeStatus(path, credentials: credentials, timeout: 120)
             log?("\(path) → HTTP \(probe.status), \(probe.body.count) bytes")
             if probe.status == 200, probe.body.count > 200 {
-                text = probe.body
-                break
+                catalogueCache = probe.body
+                return probe.body
             }
         }
-        guard let text else { return [] }
+        return nil
+    }
 
-        // Collect anything shaped like an LCU path, then keep parameter-free GETs.
-        let pattern = #"/(?:lol|riotclient|lol-[a-z0-9-]+)[a-zA-Z0-9/_{}-]*"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(text.startIndex..., in: text)
+    /// Raw context around each keyword hit. /help does not spell endpoints out as
+    /// literal paths, so seeing how it *does* name them is the only way forward.
+    static func catalogueSnippets(matching keywords: [String],
+                                  credentials: LCUCredentials,
+                                  limit: Int = 60,
+                                  window: Int = 140) async -> [String] {
+        guard let text = await catalogue(credentials: credentials) else { return [] }
+        let lower = text.lowercased()
+        var snippets: [String] = []
+        var seen = Set<String>()
+
+        for keyword in keywords {
+            var searchStart = lower.startIndex
+            while snippets.count < limit,
+                  let range = lower.range(of: keyword.lowercased(), range: searchStart..<lower.endIndex) {
+                let start = lower.index(range.lowerBound, offsetBy: -window, limitedBy: lower.startIndex) ?? lower.startIndex
+                let end = lower.index(range.upperBound, offsetBy: window, limitedBy: lower.endIndex) ?? lower.endIndex
+                let snippet = String(text[start..<end])
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+                // Collapse near-duplicates so one plugin does not fill the report.
+                let key = String(snippet.prefix(60))
+                if !seen.contains(key) {
+                    seen.insert(key)
+                    snippets.append("[\(keyword)] …\(snippet)…")
+                }
+                searchStart = range.upperBound
+            }
+        }
+        return snippets
+    }
+
+    static func discoverEndpoints(matching keywords: [String],
+                                  credentials: LCUCredentials,
+                                  log: ((String) -> Void)? = nil) async -> [String] {
+        guard let text = await catalogue(credentials: credentials, log: log) else { return [] }
 
         var found = Set<String>()
-        regex.enumerateMatches(in: text, range: range) { match, _, _ in
-            guard let match, let r = Range(match.range, in: text) else { return }
-            let path = String(text[r])
-            guard !path.contains("{"), path.count > 8 else { return }
-            let lower = path.lowercased()
-            guard keywords.contains(where: { lower.contains($0) }) else { return }
-            found.insert(path)
+        let range = NSRange(text.startIndex..., in: text)
+
+        func harvest(_ pattern: String, group: Int) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            regex.enumerateMatches(in: text, range: range) { match, _, _ in
+                guard let match, match.numberOfRanges > group,
+                      let r = Range(match.range(at: group), in: text) else { return }
+                let path = String(text[r])
+                guard path.hasPrefix("/"), !path.contains("{"), path.count > 8 else { return }
+                guard keywords.contains(where: { path.lowercased().contains($0) }) else { return }
+                found.insert(path)
+            }
         }
+
+        // 1. Explicit "path"/"url" fields, which is how /help?format=Full names them.
+        harvest(#""(?:path|url|uri)"\s*:\s*"([^"]+)""#, group: 1)
+        // 2. Literal paths anywhere in the text.
+        harvest(#"("/lol-[a-z0-9-]+/v\d+/[a-zA-Z0-9/_-]*)"#, group: 1)
+
         return found.sorted()
     }
 
@@ -420,6 +465,7 @@ enum LCU {
         var empty: [String] = []
         var missing: [String] = []
         var catalogueLog: [String] = []
+        var snippets: [String] = []
         var catalogueSize = 0
         var helpWorked = false
     }
@@ -460,11 +506,18 @@ enum LCU {
     static func scanBehaviourEndpoints(credentials: LCUCredentials) async -> BehaviourScan {
         var scan = BehaviourScan()
         var log: [String] = []
+        catalogueCache = nil   // a fresh scan should re-read the client
         var paths = await discoverEndpoints(matching: behaviourKeywords,
                                             credentials: credentials) { log.append($0) }
         scan.catalogueLog = log
         scan.catalogueSize = paths.count
         scan.helpWorked = !paths.isEmpty
+
+        // Whatever the parser made of it, show raw context so the naming scheme is
+        // visible even when no path is recognised.
+        scan.snippets = await catalogueSnippets(
+            matching: ["honor", "penalt", "restrict", "reputation", "behavior", "leaver", "muted"],
+            credentials: credentials)
 
         for path in behaviourFallbackPaths where !paths.contains(path) { paths.append(path) }
 

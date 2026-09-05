@@ -415,6 +415,9 @@ struct ClientSheet: View {
                         if !scan.missing.isEmpty {
                             text += "\n\n=== not present ===\n" + scan.missing.joined(separator: "\n")
                         }
+                        if !scan.snippets.isEmpty {
+                            text += "\n\n=== catalogue context ===\n" + scan.snippets.joined(separator: "\n")
+                        }
                         Clipboard.copy(text)
                         toast = "Copied \(scan.withData.count) responses."
                     }
@@ -457,6 +460,11 @@ struct ClientSheet: View {
                 Text("Not present: \(scan.missing.count) paths")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
+            }
+            if let scan, !scan.snippets.isEmpty {
+                Text("\(scan.snippets.count) catalogue matches — included in Copy all")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
 
             if let scan, !scan.withData.isEmpty {
