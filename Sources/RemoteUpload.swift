@@ -273,6 +273,35 @@ final class RemoteBackup: ObservableObject {
         }
     }
 
+    // MARK: Restore
+
+    /// Pulls the newest backup off the server and hands back its records.
+    func fetchLatest(passphrase: String) async throws -> (envelope: BackupEnvelope, records: [PortableAccount]) {
+        guard hasKey, !host.isEmpty, !user.isEmpty else {
+            throw BackupError(message: "Set the server address, username and key first.")
+        }
+        let target = "\(user)@\(host)"
+        let remoteDir = remotePath.isEmpty ? "." : remotePath
+        let local = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lv-restore.\(BackupService.fileExtension)")
+        try? FileManager.default.removeItem(at: local)
+
+        let batch = """
+        get "\(remoteDir)/LeagueVault-latest.\(BackupService.fileExtension)" "\(local.path)"
+        bye
+        """
+        let script = FileManager.default.temporaryDirectory.appendingPathComponent("lv-sftp-get")
+        try batch.write(to: script, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let result = run("/usr/bin/sftp", sshOptions + ["-b", script.path, target])
+        guard result.status == 0, let data = try? Data(contentsOf: local) else {
+            throw BackupError(message: friendlyError(result.output))
+        }
+        defer { try? FileManager.default.removeItem(at: local) }
+        return try BackupService.readBackup(data, passphrase: passphrase)
+    }
+
     static let stampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HHmmss"

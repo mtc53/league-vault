@@ -230,6 +230,49 @@ final class AccountStore: ObservableObject {
         vault.seal(password)
     }
 
+    // MARK: Restore
+
+    enum RestoreMode {
+        /// Add accounts this Mac does not have; leave everything already here alone.
+        case merge
+        /// Throw away the local vault and take the backup wholesale.
+        case replace
+    }
+
+    struct RestoreResult { var added = 0; var kept = 0; var removed = 0 }
+
+    /// Passwords arrive in the clear inside the backup payload and are re-encrypted
+    /// under this Mac's vault key on the way in.
+    @discardableResult
+    func restore(_ records: [PortableAccount], mode: RestoreMode) -> RestoreResult {
+        var result = RestoreResult()
+
+        if mode == .replace {
+            result.removed = accounts.count
+            accounts = records.map { record in
+                var account = record.account
+                account.normalize()
+                account.encryptedPassword = record.password.flatMap { encrypt($0) }
+                return account
+            }
+            result.added = accounts.count
+            save()
+            return result
+        }
+
+        let existing = Set(accounts.map(\.id))
+        for record in records {
+            guard !existing.contains(record.account.id) else { result.kept += 1; continue }
+            var account = record.account
+            account.normalize()
+            account.encryptedPassword = record.password.flatMap { encrypt($0) }
+            accounts.append(account)
+            result.added += 1
+        }
+        if result.added > 0 { save() }
+        return result
+    }
+
     // MARK: Export
 
     /// Plain-text export, passwords decrypted. Only written where the user chooses.

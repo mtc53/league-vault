@@ -360,6 +360,38 @@ Things worth knowing:
 which is stable across renames, so Refresh pulls the current Riot ID and reports
 `Old#TAG → New#TAG` in the banner.
 
+## Backing up to a remote server
+
+Backups go to a remote Windows machine over **SFTP**, not a Windows file share. The
+server is reached across the internet, and exposing SMB there is how ransomware travels;
+OpenSSH ships with Windows 10 and authenticates with a key file instead of a password.
+
+Each upload is one encrypted `.lvbackup`, plus `LeagueVault-latest.lvbackup` overwritten
+each time. Files land under a temporary `.part` name and are renamed on success, so a
+dropped connection never leaves a half-written backup. Old copies are pruned to the
+number you choose.
+
+### Why it is encrypted with a passphrase
+
+Day to day, account passwords are sealed with a key in this Mac's login Keychain. That
+key never leaves the Mac, so a plain copy on a server would be *unopenable* if the Mac
+died — exactly the case you keep backups for. A backup is therefore re-sealed under a key
+derived from a passphrase you choose: PBKDF2-HMAC-SHA256, 210,000 iterations, a fresh
+16-byte salt per file, AES-256-GCM. It restores onto a machine that has never seen this
+one.
+
+Only the header is readable without the passphrase — format, timestamp, account count,
+source machine, KDF parameters. Account names, Riot IDs, logins, notes and passwords are
+all inside the sealed payload.
+
+**Write the passphrase down somewhere that is not this Mac.**
+
+### Restoring
+
+Settings → **Restore from server…** pulls `LeagueVault-latest.lvbackup`, shows where and
+when it came from, then offers **Merge** (add what is missing) or **Replace** (take the
+backup wholesale). Passwords are re-encrypted under this Mac's Keychain key on the way in.
+
 ## Where the data is
 
 `~/Library/Application Support/LeagueVault/accounts.json`, mode 600.
