@@ -48,7 +48,18 @@ if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Ad-hoc signature so macOS treats it as a stable app identity for Keychain access.
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "(ad-hoc signing skipped)"
+# Sign with the local certificate when one exists, so the app keeps the same identity
+# across rebuilds — macOS ties Accessibility permission to the signature, and an ad-hoc
+# signature changes every single build. Create one with tools/make-signing-cert.sh.
+SIGN_ID="League Vault Local Signing"
+if security find-certificate -c "$SIGN_ID" >/dev/null 2>&1; then
+    codesign --force --deep --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 \
+        && echo "Signed with $SIGN_ID (permissions persist across builds)" \
+        || { echo "(signing with $SIGN_ID failed; falling back to ad-hoc)"; \
+             codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true; }
+else
+    codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "(ad-hoc signing skipped)"
+    echo "Tip: run tools/make-signing-cert.sh so Accessibility permission survives rebuilds."
+fi
 
 echo "Built $APP"

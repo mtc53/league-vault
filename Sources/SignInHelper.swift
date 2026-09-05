@@ -77,6 +77,12 @@ struct SignInHelperSheet: View {
             clientRunning = riotClient != nil
             permitted = Autofill.isPermitted
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Coming back from System Settings is exactly when this changes.
+            permitted = Autofill.isPermitted
+            clientRunning = riotClient != nil
+        }
     }
 
     private var header: some View {
@@ -145,26 +151,7 @@ struct SignInHelperSheet: View {
     /// Types the credentials into the client the way a password manager would.
     private var autofillStep: some View {
         stepBlock(number: 2, title: "Fill the login form") {
-            if !permitted {
-                Text("macOS needs to allow League Vault to send keystrokes to other apps. Grant it under Privacy & Security → Accessibility, then reopen this sheet.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 10) {
-                    Button("Request permission") {
-                        Autofill.requestPermission()
-                    }
-                    Button("Open Accessibility settings") {
-                        Autofill.openAccessibilitySettings()
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11))
-                    Button("Recheck") { permitted = Autofill.isPermitted }
-                        .buttonStyle(.link)
-                        .font(.system(size: 11))
-                    Spacer()
-                }
-            } else if account.loginUsername.isEmpty && account.encryptedPassword == nil {
+            if account.loginUsername.isEmpty && account.encryptedPassword == nil {
                 Text("Nothing saved to fill. Add a username and password in Edit.")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
@@ -204,6 +191,39 @@ struct SignInHelperSheet: View {
                     Text("Switching to the Riot Client — click the username field now.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color.accentColor)
+                }
+
+                if !permitted {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("macOS is not currently letting League Vault send keystrokes.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.orange)
+                        Text("If League Vault already appears ticked under Privacy & Security → Accessibility, the entry belongs to an older build: **remove it with the − button and add it again**. Accessibility permission is tied to the app's code signature, and every rebuild produces a new one.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 10) {
+                            Button("Open Accessibility settings") { Autofill.openAccessibilitySettings() }
+                                .buttonStyle(.link)
+                            Button("Reveal app in Finder") {
+                                NSWorkspace.shared.selectFile("/Applications/League Vault.app",
+                                                              inFileViewerRootedAtPath: "/Applications")
+                            }
+                            .buttonStyle(.link)
+                            Button("Ask macOS") { Autofill.requestPermission() }
+                                .buttonStyle(.link)
+                            Button("Recheck") { permitted = Autofill.isPermitted }
+                                .buttonStyle(.link)
+                            Spacer()
+                        }
+                        .font(.system(size: 11))
+                        Text("The button above still works — try it. This warning can be wrong; the keystrokes are the real test.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.orange.opacity(0.10)))
                 }
             }
         }

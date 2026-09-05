@@ -136,13 +136,34 @@ login screen and fills the form:
 ### Accessibility permission
 
 Synthesising keystrokes into another application requires macOS Accessibility
-permission. The sheet detects when it is missing and offers both the system prompt and a
-direct link to Privacy & Security → Accessibility.
+permission, under Privacy & Security → Accessibility.
 
-**The permission is tied to the app's code signature, and `build.sh` ad-hoc signs, which
-produces a new signature every build.** After rebuilding you will usually have to remove
-League Vault from the Accessibility list and add it again. That is a consequence of
-local ad-hoc signing, not a bug.
+macOS ties that permission to the app's **code signature**. An ad-hoc signature changes
+on every single build, so the app would silently lose permission each time it was
+rebuilt — while still appearing ticked in the list, because the entry belonged to a
+build that no longer existed.
+
+`tools/make-signing-cert.sh` fixes that. It creates a local self-signed code-signing
+certificate in your login keychain, and `build.sh` uses it whenever it is present, so
+every build carries the same designated requirement:
+
+```
+designated => identifier "com.corbin.leaguevault" and certificate leaf = H"8351054e…"
+```
+
+Grant Accessibility once and it survives rebuilds. The certificate is local, is used for
+nothing but this app, and can be removed with:
+
+```
+security delete-certificate -c "League Vault Local Signing"
+```
+
+**Switching from ad-hoc to the certificate changes the signature once**, so the first
+time you will need to remove the stale League Vault entry from the Accessibility list
+with the − button and add the app again. After that it stays.
+
+The sheet's permission warning is advisory only — the Fill button always works, because
+the check can be wrong and the keystrokes are the real test.
 
 ### How the filling works
 
