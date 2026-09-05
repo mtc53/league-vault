@@ -122,18 +122,34 @@ Find an id on a community icon site and type it in, or scroll the grid.
 
 ## Signing in
 
-The **Sign in** button on an account walks the Riot Client to the login screen with that
-account's details on hand:
+The **Sign in** button on an account opens a sheet that gets the Riot Client to the
+login screen and fills the form:
 
 1. **Quit Riot Client** if it is running (it is signed in to someone else), or **Open**
    it if it is not
-2. **Copy username** — paste it in
-3. **Copy password** — paste it in and press return; the clipboard wipes after 45 seconds
+2. **Fill username & password** — focuses the client, counts down three seconds so you
+   can click the username field, then types the username, tabs, and types the password
+3. Copying either field by hand is still there as a fallback
 
-**It does not type the password in and submit it.** That last step stays with you, on
-purpose: automated credential submission is the one thing this app will not do, however
-convenient it would be. If you want genuine one-click sign-in, a password manager's
-autofill is built for it and integrates with the Riot Client properly.
+**Return is never sent.** The form is filled; pressing enter is yours.
+
+### Accessibility permission
+
+Synthesising keystrokes into another application requires macOS Accessibility
+permission. The sheet detects when it is missing and offers both the system prompt and a
+direct link to Privacy & Security → Accessibility.
+
+**The permission is tied to the app's code signature, and `build.sh` ad-hoc signs, which
+produces a new signature every build.** After rebuilding you will usually have to remove
+League Vault from the Accessibility list and add it again. That is a consequence of
+local ad-hoc signing, not a bug.
+
+### How the filling works
+
+Keystrokes go to whichever app is frontmost, one UTF-16 unit at a time with a small gap
+— Electron-based clients drop input posted faster than they can consume it. The password
+is read from the vault at the moment you press the button and never touches the
+clipboard.
 
 ## Friends
 

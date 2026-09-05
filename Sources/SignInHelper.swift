@@ -13,8 +13,13 @@ struct SignInHelperSheet: View {
     @State private var step: Step = .start
     @State private var toast: String?
     @State private var clientRunning = false
+    @State private var countdown = 0
+    @State private var filling = false
+    @State private var permitted = Autofill.isPermitted
 
     enum Step { case start, clientReady, usernameCopied, passwordCopied }
+
+    private var stepCount: Int { 4 }
 
     private static let riotClientPath = "/Users/Shared/Riot Games/Riot Client.app"
 
@@ -39,6 +44,8 @@ struct SignInHelperSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     stepOne
+                    Divider()
+                    autofillStep
                     Divider()
                     stepTwo
                     Divider()
@@ -66,7 +73,10 @@ struct SignInHelperSheet: View {
             .padding(.vertical, 14)
         }
         .frame(width: 520)
-        .onAppear { clientRunning = riotClient != nil }
+        .onAppear {
+            clientRunning = riotClient != nil
+            permitted = Autofill.isPermitted
+        }
     }
 
     private var header: some View {
@@ -132,8 +142,102 @@ struct SignInHelperSheet: View {
         }
     }
 
+    /// Types the credentials into the client the way a password manager would.
+    private var autofillStep: some View {
+        stepBlock(number: 2, title: "Fill the login form") {
+            if !permitted {
+                Text("macOS needs to allow League Vault to send keystrokes to other apps. Grant it under Privacy & Security → Accessibility, then reopen this sheet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("Request permission") {
+                        Autofill.requestPermission()
+                    }
+                    Button("Open Accessibility settings") {
+                        Autofill.openAccessibilitySettings()
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                    Button("Recheck") { permitted = Autofill.isPermitted }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                    Spacer()
+                }
+            } else if account.loginUsername.isEmpty && account.encryptedPassword == nil {
+                Text("Nothing saved to fill. Add a username and password in Edit.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Click into the client's username field, then press this. It types the username, tabs to the password field, and types the password. It does not press return — sign-in stays your call.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button {
+                        beginFill()
+                    } label: {
+                        if countdown > 0 {
+                            Text("Filling in \(countdown)…")
+                        } else if filling {
+                            Text("Typing…")
+                        } else {
+                            Label("Fill username & password", systemImage: "keyboard")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(filling || countdown > 0)
+
+                    if countdown > 0 {
+                        Button("Cancel") {
+                            countdown = 0
+                            toast = "Cancelled."
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                    }
+                    Spacer()
+                }
+
+                if countdown > 0 {
+                    Text("Switching to the Riot Client — click the username field now.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+    }
+
+    private func beginFill() {
+        guard let password = account.encryptedPassword == nil ? "" : store.password(for: account) else {
+            toast = "Could not decrypt the password."
+            return
+        }
+        Autofill.focusRiotClient()
+        countdown = 3
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+            Task { @MainActor in
+                guard countdown > 0 else { timer.invalidate(); return }
+                countdown -= 1
+                guard countdown == 0 else { return }
+                timer.invalidate()
+                filling = true
+                // Off the main actor: typing sleeps between keystrokes.
+                DispatchQueue.global(qos: .userInitiated).async {
+                    Autofill.fillCredentials(username: account.loginUsername, password: password)
+                    DispatchQueue.main.async {
+                        filling = false
+                        step = .passwordCopied
+                        toast = "Filled. Press return in the client when you are ready."
+                    }
+                }
+            }
+        }
+    }
+
     private var stepTwo: some View {
-        stepBlock(number: 2, title: "Username") {
+        stepBlock(number: 3, title: "Or copy the username by hand") {
             if account.loginUsername.isEmpty {
                 Text("No username saved for this account. Add one in Edit.")
                     .font(.system(size: 11))
@@ -155,7 +259,7 @@ struct SignInHelperSheet: View {
     }
 
     private var stepThree: some View {
-        stepBlock(number: 3, title: "Password") {
+        stepBlock(number: 4, title: "Or copy the password by hand") {
             if account.encryptedPassword == nil {
                 Text("No password saved for this account. Add one in Edit.")
                     .font(.system(size: 11))
@@ -183,10 +287,10 @@ struct SignInHelperSheet: View {
 
     private var note: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Why not one click?")
+            Text("How the filling works")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-            Text("Typing a password into a login form and submitting it is the one thing this app will not automate. The clipboard hand-off keeps the final keystroke yours, and the password is wiped from the clipboard after 45 seconds. If you want true one-click sign-in, a password manager's autofill is built for exactly that and integrates with the Riot Client properly.")
+            Text("Keystrokes are synthesised into whichever app is frontmost, which is why macOS asks for Accessibility permission and why the client has to be focused with the username field clicked. The password is read from the vault at the moment you press the button and is never put on the clipboard. Return is never sent — the form is filled, submitting is yours.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -213,8 +317,8 @@ struct SignInHelperSheet: View {
         switch step {
         case .start:          return false
         case .clientReady:    return number <= 1
-        case .usernameCopied: return number <= 2
-        case .passwordCopied: return number <= 3
+        case .usernameCopied: return number <= 3
+        case .passwordCopied: return number <= 4
         }
     }
 }
