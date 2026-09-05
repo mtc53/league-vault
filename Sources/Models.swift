@@ -240,8 +240,11 @@ struct LastGame: Codable, Hashable {
 
 enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
     case chatRestriction = "Chat restriction"
+    case voiceMuted = "Team voice muted"
     case rankedRestriction = "Ranked restriction"
     case lowPriorityQueue = "Low priority queue"
+    case queueDelay = "Queue delay"
+    case honorDowngrade = "Honor downgrade"
     case suspension = "Temporary suspension"
     case permanentBan = "Permanent ban"
     case honorLock = "Honor level lock"
@@ -253,7 +256,10 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .chatRestriction:   return "bubble.left.and.exclamationmark.bubble.right"
         case .rankedRestriction: return "trophy.slash"
+        case .voiceMuted:        return "mic.slash"
         case .lowPriorityQueue:  return "clock.badge.exclamationmark"
+        case .queueDelay:        return "hourglass"
+        case .honorDowngrade:    return "arrow.down.heart"
         case .suspension:        return "nosign"
         case .permanentBan:      return "xmark.octagon"
         case .honorLock:         return "lock.shield"
@@ -265,8 +271,15 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
     var isPermanentByNature: Bool { self == .permanentBan }
 }
 
+/// Where a penalty record came from.
+enum PenaltySource: String, Codable {
+    case manual
+    case client
+}
+
 struct Penalty: Codable, Hashable, Identifiable {
     var id: UUID = UUID()
+    var source: PenaltySource = .manual
     var kind: PenaltyKind = .chatRestriction
     /// Free text, e.g. "10 games" or "reason: verbal abuse".
     var detail: String = ""
@@ -275,15 +288,16 @@ struct Penalty: Codable, Hashable, Identifiable {
     var expiresAt: Date?
     var resolved: Bool = false
 
-    init(id: UUID = UUID(), kind: PenaltyKind = .chatRestriction, detail: String = "",
-         startedAt: Date = Date(), expiresAt: Date? = nil, resolved: Bool = false) {
-        self.id = id; self.kind = kind; self.detail = detail
+    init(id: UUID = UUID(), source: PenaltySource = .manual, kind: PenaltyKind = .chatRestriction,
+         detail: String = "", startedAt: Date = Date(), expiresAt: Date? = nil, resolved: Bool = false) {
+        self.id = id; self.source = source; self.kind = kind; self.detail = detail
         self.startedAt = startedAt; self.expiresAt = expiresAt; self.resolved = resolved
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = (try? c.decodeIfPresent(UUID.self, forKey: .id)).flatMap { $0 } ?? UUID()
+        source = (try? c.decodeIfPresent(PenaltySource.self, forKey: .source)).flatMap { $0 } ?? .manual
         kind = (try? c.decodeIfPresent(PenaltyKind.self, forKey: .kind)).flatMap { $0 } ?? .other
         detail = (try? c.decodeIfPresent(String.self, forKey: .detail)).flatMap { $0 } ?? ""
         startedAt = (try? c.decodeIfPresent(Date.self, forKey: .startedAt)).flatMap { $0 } ?? Date()
@@ -492,6 +506,12 @@ struct Account: Codable, Identifiable, Hashable {
     }
 
     var activePenalties: [Penalty] { penalties.filter(\.isActive) }
+
+    /// Replaces penalties the client reported, leaving hand-entered ones untouched.
+    mutating func replaceClientPenalties(with detected: [Penalty]) {
+        penalties.removeAll { $0.source == .client }
+        penalties.append(contentsOf: detected)
+    }
     var hasActivePenalty: Bool { !activePenalties.isEmpty }
 
     /// Applies a new Riot ID. The nickname follows along when it was just mirroring the

@@ -138,6 +138,9 @@ struct ClientSheet: View {
     @State private var prepRemoveFriends = QuickPrep.removesFriends
     @State private var confirmPrep = false
     @State private var prepReport: [String] = []
+    @State private var scanning = false
+    @State private var scanResults: [(path: String, body: String)] = []
+    @State private var scanned = false
 
     /// The vault entry, if any, that matches the signed-in account.
     private var linkedAccount: Account? {
@@ -179,6 +182,8 @@ struct ClientSheet: View {
                         renameBlock(me)
                         Divider()
                         vaultBlock(me)
+                        Divider()
+                        behaviourBlock
                         Divider()
                         quickPrepBlock
                         Divider()
@@ -364,6 +369,83 @@ struct ClientSheet: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// The client shows behaviour penalties in its own UI, so an endpoint exists for
+    /// them. Rather than hard-code a guess, ask the client's /help catalogue.
+    private var behaviourBlock: some View {
+        FormSection("Behaviour & penalties") {
+            Text("The client knows your honor standing and active penalties. This asks it which endpoints serve that, then reads each one.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        scanning = true
+                        defer { scanning = false }
+                        if let credentials = model.credentials {
+                            scanResults = await LCU.scanBehaviourEndpoints(credentials: credentials)
+                            scanned = true
+                        }
+                    }
+                } label: {
+                    if scanning {
+                        ProgressView().controlSize(.small).scaleEffect(0.7)
+                    } else {
+                        Label("Scan for penalty endpoints", systemImage: "magnifyingglass")
+                    }
+                }
+                .disabled(scanning)
+
+                if !scanResults.isEmpty {
+                    Button("Copy all") {
+                        let text = scanResults.map { "=== \($0.path) ===\n\($0.body)" }.joined(separator: "\n\n")
+                        Clipboard.copy(text)
+                        toast = "Copied \(scanResults.count) responses."
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                }
+                Spacer()
+            }
+
+            if scanned && scanResults.isEmpty {
+                Text("Nothing answered. The client may not expose these while signed out of a game session.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+
+            if !scanResults.isEmpty {
+                Text("\(scanResults.count) endpoint\(scanResults.count == 1 ? "" : "s") answered:")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(scanResults, id: \.path) { result in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.path)
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                Text(result.body.count > 900
+                                     ? String(result.body.prefix(900)) + "…"
+                                     : result.body)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(height: 200)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
             }
         }
     }

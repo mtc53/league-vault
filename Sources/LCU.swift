@@ -335,6 +335,63 @@ enum LCU {
                               credentials: credentials)
     }
 
+    // MARK: Endpoint discovery
+
+    /// The client publishes its own API catalogue at /help. Rather than hard-coding a
+    /// guess at where behaviour penalties live, ask the client and filter.
+    static func discoverEndpoints(matching keywords: [String], credentials: LCUCredentials) async -> [String] {
+        var text: String?
+        for path in ["/help?format=Full", "/help"] {
+            if let data = try? await request("GET", path, credentials: credentials) {
+                text = String(data: data, encoding: .utf8)
+                if text?.isEmpty == false { break }
+            }
+        }
+        guard let text else { return [] }
+
+        // Collect anything shaped like an LCU path, then keep parameter-free GETs.
+        let pattern = #"/(?:lol|riotclient|lol-[a-z0-9-]+)[a-zA-Z0-9/_{}-]*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+
+        var found = Set<String>()
+        regex.enumerateMatches(in: text, range: range) { match, _, _ in
+            guard let match, let r = Range(match.range, in: text) else { return }
+            let path = String(text[r])
+            guard !path.contains("{"), path.count > 8 else { return }
+            let lower = path.lowercased()
+            guard keywords.contains(where: { lower.contains($0) }) else { return }
+            found.insert(path)
+        }
+        return found.sorted()
+    }
+
+    /// Everything the client will tell us about behaviour, honor and restrictions.
+    static func scanBehaviourEndpoints(credentials: LCUCredentials) async -> [(path: String, body: String)] {
+        let keywords = ["honor", "behavior", "behaviour", "restrict", "penalt", "leaver", "standing", "muted"]
+        var paths = await discoverEndpoints(matching: keywords, credentials: credentials)
+
+        // Endpoints known to exist even when /help is unavailable or trimmed.
+        let fallbacks = [
+            "/lol-honor-v2/v1/profile",
+            "/lol-leaver-buster/v1/notifications",
+            "/lol-player-behavior/v1/restrictions",
+            "/lol-chat/v1/me"
+        ]
+        for path in fallbacks where !paths.contains(path) { paths.append(path) }
+
+        var results: [(String, String)] = []
+        for path in paths {
+            guard let data = try? await request("GET", path, credentials: credentials),
+                  var body = String(data: data, encoding: .utf8) else { continue }
+            body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Skip the empties so the report is only what actually answered.
+            guard !body.isEmpty, body != "[]", body != "{}", body != "null" else { continue }
+            results.append((path, body))
+        }
+        return results
+    }
+
     // MARK: Challenges
 
     /// What a challenge reset managed to clear.
