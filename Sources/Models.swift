@@ -483,6 +483,11 @@ struct Account: Codable, Identifiable, Hashable {
     var riotPoints: Int?
 
     var honorLevel: Int?
+    /// Games played in the last `recentWindowDays`, counted at the last refresh.
+    var recentGames: Int?
+    var recentGamesAsOf: Date?
+
+    static let recentWindowDays = 90
 
     var puuid: String?
     var summonerLevel: Int?
@@ -513,6 +518,8 @@ struct Account: Codable, Identifiable, Hashable {
         ownedChampions = (try? c.decodeIfPresent([OwnedChampion].self, forKey: .ownedChampions)).flatMap { $0 } ?? []
         blueEssence = try? c.decodeIfPresent(Int.self, forKey: .blueEssence)
         honorLevel = try? c.decodeIfPresent(Int.self, forKey: .honorLevel)
+        recentGames = try? c.decodeIfPresent(Int.self, forKey: .recentGames)
+        recentGamesAsOf = try? c.decodeIfPresent(Date.self, forKey: .recentGamesAsOf)
         riotPoints = try? c.decodeIfPresent(Int.self, forKey: .riotPoints)
         puuid = try? c.decodeIfPresent(String.self, forKey: .puuid)
         summonerLevel = try? c.decodeIfPresent(Int.self, forKey: .summonerLevel)
@@ -575,6 +582,15 @@ struct Account: Codable, Identifiable, Hashable {
     }
 
     var hasCriticalPenalty: Bool { activePenalties.contains { $0.kind.isCritical } }
+
+    /// "12 games" / "no games" over the tracked window, or nil when never counted.
+    var recentGamesLabel: String? {
+        guard let recentGames else { return nil }
+        return recentGames == 0 ? "no games in 3mo" : "\(recentGames) in 3mo"
+    }
+
+    /// Nothing played in the window — worth showing differently from a busy account.
+    var isDormant: Bool { recentGames == 0 }
 
     var activeQueueDelays: [Penalty] {
         activePenalties.filter { $0.kind == .queueDelay }

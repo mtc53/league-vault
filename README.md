@@ -42,8 +42,20 @@ field for anything you want to set by hand.
 | Rank (Solo/Duo + Flex), LP, W/L | Refresh, or by hand |
 | Last played game (champion, queue, result, KDA, length, time) | Refresh, or by hand |
 | Summoner level, profile icon | Refresh |
+| Games in the last 3 months | Refresh |
 | Login username + password | you |
 | Penalties | you — see below |
+
+## Activity
+
+Each sidebar row carries a badge with how many games the account has played in the last
+three months — `12 in 3mo`, or a grey `no games in 3mo` for a dormant one. Accounts that
+have never been counted show no badge at all rather than a misleading zero.
+
+The count comes from the client's match history, walked a page at a time and stopped as
+soon as it passes the ninety-day mark, so it does not read a whole history to answer the
+question. Sorting by **Games (3mo)** orders the list by it, with never-counted accounts
+last.
 
 ## Folders
 

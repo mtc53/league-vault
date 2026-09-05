@@ -198,6 +198,7 @@ enum LCU {
         var riotPoints: Int?
         var honor: HonorProfile?
         var behaviour: BehaviourSnapshot?
+        var recentGames: Int?
     }
 
     static func snapshot(credentials: LCUCredentials) async throws -> Snapshot {
@@ -208,6 +209,7 @@ enum LCU {
         async let championTask = ownedChampions(summonerId: me.summonerId, credentials: credentials)
         async let walletTask = wallet(credentials: credentials)
         async let behaviourTask = behaviour(credentials: credentials)
+        async let recentTask = recentGameCount(days: Account.recentWindowDays, credentials: credentials)
 
         let purse = await walletTask
         let behaviourResult = await behaviourTask
@@ -219,7 +221,8 @@ enum LCU {
                         blueEssence: purse.blueEssence,
                         riotPoints: purse.riotPoints,
                         honor: behaviourResult.honor,
-                        behaviour: behaviourResult)
+                        behaviour: behaviourResult,
+                        recentGames: await recentTask)
     }
 
     // MARK: Champion inventory
@@ -1211,6 +1214,56 @@ enum LCU {
                         durationSeconds: duration,
                         playedAt: playedAt,
                         matchId: matchId)
+    }
+
+    /// How many games in the last `days`, counted from the client's match history.
+    /// Paged, and stops as soon as it walks past the window — nobody needs the whole
+    /// history to answer "how much has this account been played lately".
+    static func recentGameCount(days: Int, credentials: LCUCredentials) async -> Int? {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        let pageSize = 100
+        let maxPages = 4                    // 400 games is plenty for a 3-month window
+        var total = 0
+
+        for page in 0..<maxPages {
+            let start = page * pageSize
+            let end = start + pageSize - 1
+            guard let data = try? await request(
+                "GET",
+                "/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=\(start)&endIndex=\(end)",
+                credentials: credentials) else { return page == 0 ? nil : total }
+
+            let dates = parseMatchDates(data)
+            if dates.isEmpty { return total }
+
+            total += dates.filter { $0 >= cutoff }.count
+            // Anything older than the window means the rest is older still.
+            if let oldest = dates.min(), oldest < cutoff { return total }
+            if dates.count < pageSize { return total }
+        }
+        return total
+    }
+
+    static func parseMatchDates(_ data: Data) -> [Date] {
+        struct DTO: Decodable {
+            struct Wrapper: Decodable { let games: [Game]? }
+            struct Game: Decodable {
+                let gameCreation: Double?
+                let gameCreationDate: String?
+            }
+            let games: Wrapper?
+        }
+        guard let dto = try? JSONDecoder().decode(DTO.self, from: data),
+              let games = dto.games?.games else { return [] }
+
+        let iso = ISO8601DateFormatter()
+        return games.compactMap { game in
+            if let millis = game.gameCreation, millis > 0 {
+                return Date(timeIntervalSince1970: millis / 1000)
+            }
+            if let text = game.gameCreationDate { return iso.date(from: text) }
+            return nil
+        }
     }
 
     /// Champion id → name, from the client's own bundled asset. Served locally, cached once.

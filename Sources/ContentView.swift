@@ -11,6 +11,7 @@ enum SortOrder: String, CaseIterable, Identifiable {
     case name = "Name"
     case rank = "Rank"
     case lastPlayed = "Last played"
+    case activity = "Games (3mo)"
     case region = "Region"
     var id: String { rawValue }
 }
@@ -86,6 +87,9 @@ struct ContentView: View {
             list.sort { rankWeight($0) > rankWeight($1) }
         case .lastPlayed:
             list.sort { ($0.lastGame?.playedAt ?? .distantPast) > ($1.lastGame?.playedAt ?? .distantPast) }
+        case .activity:
+            // Never-counted accounts sort last rather than pretending to be zero.
+            list.sort { ($0.recentGames ?? -1) > ($1.recentGames ?? -1) }
         }
         return list
     }
@@ -622,6 +626,10 @@ struct ContentView: View {
         if !snapshot.champions.isEmpty { current.ownedChampions = snapshot.champions }
         if let be = snapshot.blueEssence { current.blueEssence = be }
         if let rp = snapshot.riotPoints { current.riotPoints = rp }
+        if let count = snapshot.recentGames {
+            current.recentGames = count
+            current.recentGamesAsOf = Date()
+        }
         if let honor = snapshot.honor {
             current.honorLevel = honor.level
             // Only client-reported penalties are replaced; hand-entered ones stay.
@@ -746,6 +754,23 @@ struct AccountRow: View {
                                          ? (account.soloRank.hasPeak ? account.soloRank.peakTier.color.opacity(0.85) : Color.secondary)
                                          : account.soloRank.tier.color)
                         .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let label = account.recentGamesLabel {
+                        // Activity over the last three months, so a dormant smurf is
+                        // obvious without opening it.
+                        Text(label)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(account.isDormant ? Color.secondary : Color.accentColor)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                Capsule().fill((account.isDormant ? Color.secondary : Color.accentColor)
+                                    .opacity(0.15))
+                            )
+                            .help(account.recentGamesAsOf.map {
+                                "Games in the last 3 months, counted \($0.relativeDisplay)"
+                            } ?? "Games in the last 3 months")
+                    }
                 }
             }
 

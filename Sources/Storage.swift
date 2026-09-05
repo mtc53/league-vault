@@ -182,6 +182,7 @@ final class AccountStore: ObservableObject {
             try data.write(to: fileURL, options: .atomic)
             // The file holds encrypted passwords; still keep it owner-only.
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            NotificationCenter.default.post(name: .vaultDidChange, object: nil)
         } catch {
             loadError = "Could not save: \(error.localizedDescription)"
         }

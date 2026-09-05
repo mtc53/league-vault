@@ -89,6 +89,10 @@ struct AccountDetailView: View {
                     if let level = account.summonerLevel {
                         Chip(text: "Level \(level)", color: .secondary)
                     }
+                    if let count = account.recentGames {
+                        Chip(text: count == 0 ? "No games in 3 months" : "\(count) games in 3 months",
+                             color: count == 0 ? .secondary : .accentColor)
+                    }
                     if let honor = account.honorLevel {
                         Chip(text: "Honor \(honor)", color: honor >= 3 ? .green : .orange)
                             .help(honor >= 3 ? "Honor is in good standing." : "Honor is below 3 — rewards may be locked.")
