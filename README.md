@@ -356,9 +356,21 @@ tick the box; if you tick it, the exported file contains them in the clear.
 
 This is a vault, not an autologin tool. It never signs in anywhere for you.
 
-## Rebuilding the icon
+## Rebuilding the app icon
+
+The app icon is profile icon **6923** — the same one quick prep prefers — masked into
+the Big Sur rounded square with a small margin so it sits correctly beside other Dock
+icons:
 
 ```
-swift tools/makeicon.swift build/AppIcon.iconset
+curl -o build/icon6923.png \
+  https://ddragon.leagueoflegends.com/cdn/16.17.1/img/profileicon/6923.png
+swift tools/makeicon-from-image.swift build/icon6923.png build/AppIcon.iconset
 iconutil -c icns build/AppIcon.iconset -o Resources/AppIcon.icns
 ```
+
+Any square PNG works as the source. `tools/makeicon.swift` still draws the original
+shield-and-keyhole icon if you want it back.
+
+macOS caches app icons aggressively; after replacing the bundle, `touch` it and
+`killall Dock` to see the change.
