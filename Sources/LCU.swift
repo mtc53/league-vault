@@ -404,7 +404,7 @@ enum LCU {
     /// literal paths, so seeing how it *does* name them is the only way forward.
     static func catalogueSnippets(matching keywords: [String],
                                   credentials: LCUCredentials,
-                                  limit: Int = 60,
+                                  limit: Int = 6,
                                   window: Int = 140) async -> [String] {
         guard let text = await catalogue(credentials: credentials) else { return [] }
         let lower = text.lowercased()
@@ -413,7 +413,8 @@ enum LCU {
 
         for keyword in keywords {
             var searchStart = lower.startIndex
-            while snippets.count < limit,
+            var perKeyword = 0
+            while perKeyword < limit,
                   let range = lower.range(of: keyword.lowercased(), range: searchStart..<lower.endIndex) {
                 let start = lower.index(range.lowerBound, offsetBy: -window, limitedBy: lower.startIndex) ?? lower.startIndex
                 let end = lower.index(range.upperBound, offsetBy: window, limitedBy: lower.endIndex) ?? lower.endIndex
@@ -425,6 +426,7 @@ enum LCU {
                 if !seen.contains(key) {
                     seen.insert(key)
                     snippets.append("[\(keyword)] …\(snippet)…")
+                    perKeyword += 1
                 }
                 searchStart = range.upperBound
             }
@@ -438,25 +440,46 @@ enum LCU {
         guard let text = await catalogue(credentials: credentials, log: log) else { return [] }
 
         var found = Set<String>()
-        let range = NSRange(text.startIndex..., in: text)
-
-        func harvest(_ pattern: String, group: Int) {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-            regex.enumerateMatches(in: text, range: range) { match, _, _ in
-                guard let match, match.numberOfRanges > group,
-                      let r = Range(match.range(at: group), in: text) else { return }
-                let path = String(text[r])
-                guard path.hasPrefix("/"), !path.contains("{"), path.count > 8 else { return }
-                guard keywords.contains(where: { path.lowercased().contains($0) }) else { return }
-                found.insert(path)
-            }
+        for path in allEndpoints(in: text) {
+            guard keywords.contains(where: { path.lowercased().contains($0) }) else { continue }
+            found.insert(path)
         }
+        return found.sorted()
+    }
 
-        // 1. Explicit "path"/"url" fields, which is how /help?format=Full names them.
-        harvest(#""(?:path|url|uri)"\s*:\s*"([^"]+)""#, group: 1)
-        // 2. Literal paths anywhere in the text.
-        harvest(#"("/lol-[a-z0-9-]+/v\d+/[a-zA-Z0-9/_-]*)"#, group: 1)
+    /// /help does not print URLs. It prints event names —
+    /// `OnJsonApiEvent_lol-honor-v2_v1_profile` — where each underscore is a path
+    /// separator. That converts straight back into `/lol-honor-v2/v1/profile`.
+    static func allEndpoints(in catalogue: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #""OnJsonApiEvent_([A-Za-z0-9_-]+)""#) else { return [] }
+        let range = NSRange(catalogue.startIndex..., in: catalogue)
+        var found = Set<String>()
+        regex.enumerateMatches(in: catalogue, range: range) { match, _, _ in
+            guard let match, match.numberOfRanges > 1,
+                  let r = Range(match.range(at: 1), in: catalogue) else { return }
+            let path = "/" + String(catalogue[r]).replacingOccurrences(of: "_", with: "/")
+            found.insert(path)
+        }
+        return found.sorted()
+    }
 
+    /// Test seam: filter a catalogue string without touching the network.
+    static func discoverEndpointsForTest(catalogue: String, keywords: [String]) async -> [String] {
+        allEndpoints(in: catalogue).filter { path in
+            keywords.contains { path.lowercased().contains($0) }
+        }
+    }
+
+    /// Every plugin the client has loaded, from the `Plugin <name>` tags.
+    static func allPlugins(in catalogue: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #""Plugin ([a-z0-9-]+)""#) else { return [] }
+        let range = NSRange(catalogue.startIndex..., in: catalogue)
+        var found = Set<String>()
+        regex.enumerateMatches(in: catalogue, range: range) { match, _, _ in
+            guard let match, match.numberOfRanges > 1,
+                  let r = Range(match.range(at: 1), in: catalogue) else { return }
+            found.insert(String(catalogue[r]))
+        }
         return found.sorted()
     }
 
@@ -466,6 +489,8 @@ enum LCU {
         var missing: [String] = []
         var catalogueLog: [String] = []
         var snippets: [String] = []
+        var plugins: [String] = []
+        var totalEndpoints = 0
         var catalogueSize = 0
         var helpWorked = false
     }
@@ -515,11 +540,22 @@ enum LCU {
 
         // Whatever the parser made of it, show raw context so the naming scheme is
         // visible even when no path is recognised.
+        if let text = await catalogue(credentials: credentials) {
+            scan.totalEndpoints = allEndpoints(in: text).count
+            // Plugins whose name hints at behaviour; the full count tells us the
+            // catalogue really was parsed.
+            let interesting = ["honor", "penalt", "restrict", "reputation", "behavi",
+                               "leaver", "mute", "ban", "suspend", "reform", "standing", "punish"]
+            scan.plugins = allPlugins(in: text).filter { plugin in
+                interesting.contains { plugin.contains($0) }
+            }
+        }
         scan.snippets = await catalogueSnippets(
-            matching: ["honor", "penalt", "restrict", "reputation", "behavior", "leaver", "muted"],
+            matching: ["penalt", "restrict", "reputation", "behavi", "suspend", "reform", "punish", "standing"],
             credentials: credentials)
 
         for path in behaviourFallbackPaths where !paths.contains(path) { paths.append(path) }
+        if paths.count > 70 { paths = Array(paths.prefix(70)) }
 
         for path in paths {
             let probe = await probeStatus(path, credentials: credentials)

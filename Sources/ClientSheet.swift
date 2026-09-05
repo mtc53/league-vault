@@ -406,8 +406,13 @@ struct ClientSheet: View {
 
                 if let scan, !scan.withData.isEmpty || !scan.empty.isEmpty {
                     Button("Copy all") {
-                        var text = "catalogue: \(scan.helpWorked ? "\(scan.catalogueSize) matching paths" : "unavailable")\n"
-                        text += scan.catalogueLog.map { "  " + $0 }.joined(separator: "\n") + "\n\n"
+                        var text = "catalogue: \(scan.helpWorked ? "\(scan.catalogueSize) matching paths" : "unavailable")"
+                        text += " · \(scan.totalEndpoints) endpoints total\n"
+                        text += scan.catalogueLog.map { "  " + $0 }.joined(separator: "\n") + "\n"
+                        if !scan.plugins.isEmpty {
+                            text += "\nbehaviour-ish plugins: " + scan.plugins.joined(separator: ", ") + "\n"
+                        }
+                        text += "\n"
                         text += scan.withData.map { "=== \($0.path) ===\n\($0.body)" }.joined(separator: "\n\n")
                         if !scan.empty.isEmpty {
                             text += "\n\n=== exists but empty ===\n" + scan.empty.joined(separator: "\n")
@@ -429,11 +434,17 @@ struct ClientSheet: View {
 
             if let scan {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(scan.helpWorked
-                         ? "Catalogue: \(scan.catalogueSize) matching paths."
+                    Text(scan.totalEndpoints > 0
+                         ? "Catalogue: \(scan.totalEndpoints) endpoints, \(scan.catalogueSize) matching."
                          : "No catalogue answered — only the known paths were tried.")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
+                    if !scan.plugins.isEmpty {
+                        Text("Plugins: " + scan.plugins.joined(separator: ", "))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     ForEach(scan.catalogueLog, id: \.self) { line in
                         Text(line)
                             .font(.system(size: 9, design: .monospaced))
