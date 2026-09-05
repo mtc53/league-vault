@@ -77,6 +77,20 @@ Keys are matched case-insensitively across `lol_blue_essence` / `blueEssence` /
 numbers, doubles or strings. If every shape fails, the client sheet shows a **wallet
 unavailable** chip rather than silently showing nothing.
 
+## Profile icons
+
+The **League Client** sheet has **Change icon…** next to the Riot ID. It browses every
+profile icon Data Dragon publishes — about 5,000, newest first — and applies one with
+`PUT /lol-summoner/v1/current-summoner/icon`.
+
+**Ownership is not checked.** This is the same call the client's own picker makes,
+without the inventory filter in front of it, so any id works. Riot may reset an unowned
+icon server-side; if it snaps back, that is Riot's doing.
+
+Riot publishes no *names* for profile icons — Data Dragon and Community Dragon both
+expose only ids and image paths — so the search box filters by id, not by champion.
+Find an id on a community icon site and type it in, or scroll the grid.
+
 ## Friends
 
 The **League Client** sheet lists the signed-in account's friends and offers

@@ -323,6 +323,18 @@ enum LCU {
         return Wallet(blueEssence: number(blueEssenceKeys), riotPoints: number(riotPointsKeys))
     }
 
+    // MARK: Profile icon
+
+    /// PUT /lol-summoner/v1/current-summoner/icon
+    ///
+    /// The client accepts any icon id, owned or not — this is the same call its own
+    /// icon picker makes, without the inventory filter in front of it.
+    static func setProfileIcon(id: Int, credentials: LCUCredentials) async throws {
+        _ = try await request("PUT", "/lol-summoner/v1/current-summoner/icon",
+                              body: ["profileIconId": id],
+                              credentials: credentials)
+    }
+
     // MARK: Friends
 
     struct Friend: Identifiable, Hashable {

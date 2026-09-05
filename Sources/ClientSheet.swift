@@ -84,6 +84,7 @@ struct ClientSheet: View {
     @State private var probeResult = ""
     @State private var probing = false
     @State private var confirmRemoveFriends = false
+    @State private var showIconPicker = false
 
     /// The vault entry, if any, that matches the signed-in account.
     private var linkedAccount: Account? {
@@ -156,6 +157,15 @@ struct ClientSheet: View {
         }
         .frame(width: 580)
         .task { await model.probe() }
+        .sheet(isPresented: $showIconPicker) {
+            if let credentials = model.credentials {
+                IconPickerSheet(credentials: credentials,
+                                currentIconId: model.summoner?.profileIconId) { applied in
+                    toast = "Profile icon set to \(applied)."
+                    Task { await model.probe() }
+                }
+            }
+        }
         .alert("Change your Riot ID?", isPresented: $confirmRename) {
             Button("Cancel", role: .cancel) { }
             Button("Change Riot ID") {
@@ -202,9 +212,14 @@ struct ClientSheet: View {
                                 size: 48,
                                 corner: 10)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(me.riotID)
-                        .font(.system(size: 15, weight: .semibold))
-                        .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        Text(me.riotID)
+                            .font(.system(size: 15, weight: .semibold))
+                            .textSelection(.enabled)
+                        Button("Change icon…") { showIconPicker = true }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11))
+                    }
                     HStack(spacing: 6) {
                         if let region = model.region {
                             Chip(text: region.display, color: .secondary)

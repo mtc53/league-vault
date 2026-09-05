@@ -8,6 +8,8 @@ final class ProfileIconCache: ObservableObject {
     static let shared = ProfileIconCache()
 
     @Published private(set) var images: [Int: NSImage] = [:]
+    /// Every profile icon id Data Dragon knows about, newest first.
+    @Published private(set) var catalog: [Int] = []
 
     private var inFlight: Set<Int> = []
     private var missing: Set<Int> = []
@@ -82,6 +84,29 @@ final class ProfileIconCache: ObservableObject {
         } catch {
             // Fall back to whatever we saw last time rather than showing nothing.
             return defaults.string(forKey: "ddragonVersion")
+        }
+    }
+
+    /// Data Dragon's full profile-icon list. Includes icons you do not own — the client
+    /// accepts any id, so the picker is not limited to your inventory.
+    func loadCatalog() async {
+        guard catalog.isEmpty else { return }
+        guard let version = await resolveVersion(),
+              let url = URL(string: "https://ddragon.leagueoflegends.com/cdn/\(version)/data/en_US/profileicon.json")
+        else { return }
+
+        struct Payload: Decodable {
+            struct Entry: Decodable { let id: Int? }
+            let data: [String: Entry]
+        }
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 20
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let payload = try JSONDecoder().decode(Payload.self, from: data)
+            catalog = payload.data.values.compactMap(\.id).filter { $0 >= 0 }.sorted(by: >)
+        } catch {
+            catalog = []
         }
     }
 
