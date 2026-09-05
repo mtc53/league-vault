@@ -515,6 +515,17 @@ enum LCU {
         "/lol-honor-v2/v1/standing",
         "/lol-leaver-buster/v1/notifications",
         "/lol-leaver-buster/v1/state",
+        "/lol-leaver-buster/v1/ranked-restriction",
+        "/lol-leaver-buster/v1/queue-lockout",
+        "/lol-player-behavior/v1/reform-card",
+        "/lol-player-behavior/v2/reform-card",
+        "/lol-player-behavior/v3/reform-cards",
+        "/lol-player-behavior/v1/config",
+        "/lol-player-behavior/v1/code-of-conduct-notification",
+        "/lol-player-behavior/v1/notifications",
+        "/ga-restriction/v1/penalty-notifications",
+        "/lol-lobby-team-builder/v1/matchmaking",
+        "/lol-matchmaking/v1/search/errors",
         "/lol-player-behavior/v1/restrictions",
         "/lol-player-behavior/v1/behavior-standing",
         "/lol-player-behavior/v1/penalties",
@@ -557,13 +568,22 @@ enum LCU {
             matching: ["penalt", "restrict", "reputation", "behavi", "suspend", "reform", "punish", "standing"],
             credentials: credentials)
 
+        // Config namespaces are server settings, not player state, and there are
+        // hundreds of them — they swallowed the whole probe budget last time and the
+        // player-behavior endpoints were never reached.
+        let noise = ["/lol-platform-config/", "/lol-game-queues/", "/lol-settings/"]
+        paths.removeAll { path in noise.contains { path.hasPrefix($0) } }
+
         for path in behaviourFallbackPaths where !paths.contains(path) { paths.append(path) }
-        if paths.count > 70 { paths = Array(paths.prefix(70)) }
+        if paths.count > 200 { paths = Array(paths.prefix(200)) }
 
         for path in paths {
             let probe = await probeStatus(path, credentials: credentials)
             if probe.hasData {
-                scan.withData.append((path, probe.body.trimmingCharacters(in: .whitespacesAndNewlines)))
+                // Keep the report readable; one endpoint dumped 200 KB of queue config.
+                var body = probe.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                if body.count > 1200 { body = String(body.prefix(1200)) + "… [truncated]" }
+                scan.withData.append((path, body))
             } else if probe.exists {
                 scan.empty.append("\(path) [HTTP \(probe.status)]")
             } else {
