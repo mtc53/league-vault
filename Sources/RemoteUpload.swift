@@ -166,16 +166,23 @@ final class RemoteBackup: ObservableObject {
         else { return (-1, "could not stage the mkdir batch") }
         defer { try? FileManager.default.removeItem(at: script) }
 
-        return run("/usr/bin/sftp", sshOptions + ["-b", script.path, target])
+        return run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target])
     }
 
-    private var sshOptions: [String] {
+    /// Shared with both tools; only the port flag differs between them.
+    private var commonOptions: [String] {
         ["-i", keyPath,
-         "-p", String(port),
          "-o", "BatchMode=yes",              // never sit waiting for a password prompt
          "-o", "StrictHostKeyChecking=accept-new",
          "-o", "ConnectTimeout=15"]
     }
+
+    /// ssh takes a lowercase -p for the port.
+    private var sshOptions: [String] { ["-p", String(port)] + commonOptions }
+
+    /// sftp takes an uppercase -P; lowercase -p means "preserve timestamps" there, so
+    /// passing ssh's flags to sftp makes it reject the whole command line.
+    private var sftpOptions: [String] { ["-P", String(port)] + commonOptions }
 
     /// Creates the keypair if it does not exist yet.
     @discardableResult
@@ -226,6 +233,9 @@ final class RemoteBackup: ObservableObject {
     /// Turns ssh's output into something actionable.
     private func friendlyError(_ output: String) -> String {
         let text = output.lowercased()
+        if text.contains("usage: sftp") || text.contains("usage: ssh") {
+            return "League Vault built a bad command line — this is a bug in the app, not a problem with your server. Please report it."
+        }
         if text.contains("permission denied") {
             return "The server refused the key. The public key is probably not in the right authorized_keys file on Windows — see the setup steps."
         }
@@ -291,7 +301,7 @@ final class RemoteBackup: ObservableObject {
             try batch.write(to: script, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: script) }
 
-            let result = run("/usr/bin/sftp", sshOptions + ["-b", script.path, target])
+            let result = run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target])
             guard result.status == 0 else {
                 lastError = "\(reason.capitalized) upload failed: \(friendlyError(result.output))"
                 return false
@@ -352,7 +362,7 @@ final class RemoteBackup: ObservableObject {
         try batch.write(to: script, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: script) }
 
-        let result = run("/usr/bin/sftp", sshOptions + ["-b", script.path, target])
+        let result = run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target])
         guard result.status == 0, let data = try? Data(contentsOf: local) else {
             throw BackupError(message: friendlyError(result.output))
         }
