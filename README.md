@@ -372,6 +372,19 @@ Backups go to a remote Windows machine over **SFTP**, not a Windows file share. 
 server is reached across the internet, and exposing SMB there is how ransomware travels;
 OpenSSH ships with Windows 10 and authenticates with a key file instead of a password.
 
+### Where the files land
+
+An SSH session on Windows starts in the user's profile folder, so the default
+`LeagueVaultBackups` puts them in:
+
+```
+C:\Users\<your-windows-username>\LeagueVaultBackups\
+```
+
+Settings spells out the full path under the folder field as you type it. Enter an
+absolute path such as `C:\Backups` or `D:\Vault\League` to put them anywhere else;
+forward slashes are accepted and shown back as Windows separators.
+
 Each upload is one encrypted `.lvbackup`, plus `LeagueVault-latest.lvbackup` overwritten
 each time. Files land under a temporary `.part` name and are renamed on success, so a
 dropped connection never leaves a half-written backup. Old copies are pruned to the

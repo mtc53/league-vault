@@ -130,6 +130,20 @@ struct SettingsView: View {
             Field("Folder on the server") {
                 TextField("LeagueVaultBackups", text: $remote.remotePath)
             }
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text("Files land in \(remote.resolvedWindowsPath)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Spacer()
+            }
+            Text("A plain name hangs off your Windows user folder, because that is where an SSH session starts. Type a full path like C:\\Backups to put it elsewhere.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider().padding(.vertical, 2)
 

@@ -73,6 +73,21 @@ final class RemoteBackup: ObservableObject {
 
     var hasKey: Bool { FileManager.default.fileExists(atPath: keyPath) }
 
+    /// Where the files actually land, spelled out in Windows terms. An SFTP session on
+    /// Windows OpenSSH starts in the user's profile folder, so a relative path hangs off
+    /// C:\Users\<user>. An absolute path is passed through as typed.
+    var resolvedWindowsPath: String {
+        let folder = remotePath.trimmingCharacters(in: .whitespaces)
+        if folder.isEmpty { return "C:\\Users\\\(user.isEmpty ? "<username>" : user)" }
+        // Already absolute: C:\..., C:/... or /C:/...
+        let looksAbsolute = folder.contains(":") || folder.hasPrefix("/")
+        if looksAbsolute {
+            return folder.replacingOccurrences(of: "/", with: "\\")
+        }
+        let user = self.user.isEmpty ? "<username>" : self.user
+        return "C:\\Users\\\(user)\\" + folder.replacingOccurrences(of: "/", with: "\\")
+    }
+
     var publicKey: String {
         (try? String(contentsOfFile: keyPath + ".pub", encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
