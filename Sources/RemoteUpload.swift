@@ -138,6 +138,37 @@ final class RemoteBackup: ObservableObject {
         return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 
+    /// sftp wants forward slashes even when talking to Windows.
+    private var sftpPath: String {
+        let folder = remotePath.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "\\", with: "/")
+        return folder.isEmpty ? "." : folder
+    }
+
+    /// Builds the folder, one level at a time, so a nested path works too. Each mkdir is
+    /// prefixed with "-" so an existing folder is not treated as a failure.
+    private func makeRemoteDirectory(target: String) -> (status: Int32, output: String) {
+        let path = sftpPath
+        guard path != "." else { return (0, "") }
+
+        var built: [String] = []
+        var prefix = ""
+        for segment in path.split(separator: "/") {
+            // Keep a drive letter attached to the first real segment: C:/Backups.
+            prefix = prefix.isEmpty ? String(segment) : prefix + "/" + String(segment)
+            if prefix.hasSuffix(":") { continue }        // "C:" alone is not a folder
+            built.append("-mkdir \"\(prefix)\"")
+        }
+        built.append("bye")
+
+        let script = FileManager.default.temporaryDirectory.appendingPathComponent("lv-sftp-mkdir")
+        guard (try? built.joined(separator: "\n").write(to: script, atomically: true, encoding: .utf8)) != nil
+        else { return (-1, "could not stage the mkdir batch") }
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        return run("/usr/bin/sftp", sshOptions + ["-b", script.path, target])
+    }
+
     private var sshOptions: [String] {
         ["-i", keyPath,
          "-p", String(port),
@@ -179,11 +210,16 @@ final class RemoteBackup: ObservableObject {
             return false
         }
         lastError = nil
-        log.append("Connected. Making sure \(remotePath) exists…")
-        // mkdir works on both a Windows and a Unix sftp server.
-        let mk = run("/usr/bin/sftp", sshOptions + ["-b", "-", target])
-        _ = mk
-        log.append("Ready.")
+        log.append("Connected. Creating \(resolvedWindowsPath) if it is not there…")
+
+        let mk = makeRemoteDirectory(target: target)
+        // "-mkdir" swallows "already exists"; anything else is worth surfacing.
+        if mk.status != 0 {
+            lastError = "Connected, but the folder could not be created: \(friendlyError(mk.output))"
+            log.append(mk.output.trimmingCharacters(in: .whitespacesAndNewlines))
+            return false
+        }
+        log.append("Folder ready. Backups will be written to \(resolvedWindowsPath).")
         return true
     }
 
@@ -237,12 +273,15 @@ final class RemoteBackup: ObservableObject {
             defer { try? FileManager.default.removeItem(at: staged) }
 
             let target = "\(user)@\(host)"
-            let remoteDir = remotePath.isEmpty ? "." : remotePath
+            let remoteDir = sftpPath
 
-            // One batch: make the folder, upload under a temporary name, then rename, so
-            // a dropped connection never leaves a half-written backup behind.
+            // Make sure the folder exists — including every level of a nested path —
+            // before writing into it.
+            _ = makeRemoteDirectory(target: target)
+
+            // Upload under a temporary name and rename on success, so a dropped
+            // connection never leaves a half-written backup behind.
             let batch = """
-            -mkdir "\(remoteDir)"
             put "\(staged.path)" "\(remoteDir)/\(name).part"
             rename "\(remoteDir)/\(name).part" "\(remoteDir)/\(name)"
             put "\(staged.path)" "\(remoteDir)/LeagueVault-latest.\(BackupService.fileExtension)"
@@ -272,7 +311,11 @@ final class RemoteBackup: ObservableObject {
 
     /// Deletes all but the newest `keepCount` timestamped files, leaving -latest alone.
     private func prune(target: String, directory: String) {
-        let listing = run("/usr/bin/ssh", sshOptions + [target, "ls", directory])
+        // `dir` on Windows, `ls` elsewhere: ask the shell for whichever works.
+        var listing = run("/usr/bin/ssh", sshOptions + [target, "ls", directory])
+        if listing.status != 0 || listing.output.isEmpty {
+            listing = run("/usr/bin/ssh", sshOptions + [target, "dir", "/b", directory.replacingOccurrences(of: "/", with: "\\")])
+        }
         guard listing.status == 0 else { return }
 
         let files = listing.output
@@ -296,7 +339,7 @@ final class RemoteBackup: ObservableObject {
             throw BackupError(message: "Set the server address, username and key first.")
         }
         let target = "\(user)@\(host)"
-        let remoteDir = remotePath.isEmpty ? "." : remotePath
+        let remoteDir = sftpPath
         let local = FileManager.default.temporaryDirectory
             .appendingPathComponent("lv-restore.\(BackupService.fileExtension)")
         try? FileManager.default.removeItem(at: local)

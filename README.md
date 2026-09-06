@@ -381,6 +381,10 @@ An SSH session on Windows starts in the user's profile folder, so the default
 C:\Users\<your-windows-username>\LeagueVaultBackups\
 ```
 
+**You do not need to create the folder** — the app makes it, one level at a time, so a
+nested path like `Documents/Backups` works too. **Test connection** creates it as well,
+so you can confirm the whole path before enabling uploads.
+
 Settings spells out the full path under the folder field as you type it. Enter an
 absolute path such as `C:\Backups` or `D:\Vault\League` to put them anywhere else;
 forward slashes are accepted and shown back as Windows separators.
