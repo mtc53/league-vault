@@ -812,7 +812,7 @@ struct ClientSheet: View {
         account.profileIconId = me.profileIconId
         if let region = model.region { account.region = region }
         if let snapshot = model.snapshot {
-            for entry in snapshot.ranks { account.setRank(entry) }
+            for entry in snapshot.ranks { account.applyLiveRank(entry) }
             if let honor = snapshot.honor {
                 account.honorLevel = honor.level
                 account.replaceClientPenalties(with: LCU.penalties(from: snapshot.behaviour ?? LCU.BehaviourSnapshot(honor: honor)))

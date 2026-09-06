@@ -235,6 +235,12 @@ discoverable in a few clicks, and the response tells you which key names it uses
 Riot exposes no peak-rank endpoint anywhere, so each queue has a **Peak tier**,
 **Peak division** and a free-text **When** ("S13 split 2") that you fill in yourself.
 
+A refresh never touches it — the client knows nothing about peak rank, so the recorded
+value is carried across rather than overwritten with a blank one. The single exception
+is upward: if the live rank is *above* the recorded peak, the peak is raised to match,
+because it plainly is the new peak. Your note is kept either way, and the editor can
+still correct a peak in any direction.
+
 Peak rank is what an unranked account shows in the sidebar — `Unranked · peak Diamond II`
 — tinted with the peak's colour instead of grey. Sorting by Rank puts unranked accounts
 below every ranked one, but orders them among themselves by peak.

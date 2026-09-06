@@ -144,6 +144,15 @@ struct RankEntry: Codable, Hashable, Identifiable {
 
     var hasPeak: Bool { peakTier != .unranked }
 
+    /// Orders tier+division on the ladder. Apex tiers have no divisions, so they sit at
+    /// the top of their tier.
+    static func ladderPosition(tier: Tier, division: Division) -> Int {
+        guard tier != .unranked else { return 0 }
+        let tierIndex = Tier.allCases.firstIndex(of: tier) ?? 0
+        let divisionIndex = tier.isApex ? 4 : (4 - (Division.allCases.firstIndex(of: division) ?? 0))
+        return tierIndex * 10 + divisionIndex
+    }
+
     /// "Gold II", or just "Master" for apex tiers. nil when no peak was entered.
     var peakDisplay: String? {
         guard hasPeak else { return nil }
@@ -616,12 +625,36 @@ struct Account: Codable, Identifiable, Hashable {
         tagLine = newTag
     }
 
+    /// Replaces a rank wholesale, peak included. Used by the editor, where the peak is
+    /// being edited on purpose.
     mutating func setRank(_ entry: RankEntry) {
         if let idx = ranks.firstIndex(where: { $0.queue == entry.queue }) {
             ranks[idx] = entry
         } else {
             ranks.append(entry)
         }
+    }
+
+    /// Applies a rank read from the client. The client knows nothing about peak rank —
+    /// it is recorded by hand — so the stored peak is carried across rather than being
+    /// overwritten with a blank one. If the live rank is above the recorded peak, the
+    /// peak is raised to match, since it plainly is the new peak.
+    mutating func applyLiveRank(_ entry: RankEntry) {
+        guard let idx = ranks.firstIndex(where: { $0.queue == entry.queue }) else {
+            ranks.append(entry)
+            return
+        }
+        var merged = entry
+        merged.peakTier = ranks[idx].peakTier
+        merged.peakDivision = ranks[idx].peakDivision
+        merged.peakNote = ranks[idx].peakNote
+
+        if RankEntry.ladderPosition(tier: entry.tier, division: entry.division)
+            > RankEntry.ladderPosition(tier: merged.peakTier, division: merged.peakDivision) {
+            merged.peakTier = entry.tier
+            merged.peakDivision = entry.division
+        }
+        ranks[idx] = merged
     }
 
     mutating func normalize() {

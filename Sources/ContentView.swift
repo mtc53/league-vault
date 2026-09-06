@@ -621,7 +621,7 @@ struct ContentView: View {
         current.summonerLevel = me.summonerLevel
         if let icon = me.profileIconId { current.profileIconId = icon }
         if let region = snapshot.region { current.region = region }
-        for entry in snapshot.ranks { current.setRank(entry) }
+        for entry in snapshot.ranks { current.applyLiveRank(entry) }
         if let game = snapshot.lastGame { current.lastGame = game }
         if !snapshot.champions.isEmpty { current.ownedChampions = snapshot.champions }
         if let be = snapshot.blueEssence { current.blueEssence = be }
