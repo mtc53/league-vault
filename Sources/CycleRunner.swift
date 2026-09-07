@@ -171,23 +171,33 @@ final class CycleRunner: ObservableObject {
         // Let the login screen settle and take focus before typing at it.
         try await sleep(4)
 
-        // 2. Bring the Riot Client forward and type into it. A freshly launched client
-        //    can take a few seconds before its window will accept focus, so keep trying.
+        // 2. Bring the Riot Client forward and type into it. League Vault must not be
+        //    frontmost when the keystrokes fire, or they land in our own window — its
+        //    modal sheet keeps it key otherwise, which is why nothing was typed. So hide
+        //    League Vault for the brief typing window, then bring it back.
         set(index, .signingIn, "Focusing the Riot Client")
+        hideSelf()
+        try await sleep(0.6)
+
         var focused = false
         for attempt in 0..<6 {
             if Autofill.focusRiotClient() { focused = true; break }
-            try checkCancel()
+            if Task.isCancelled { showSelf(); throw CancellationError() }
             set(index, .signingIn, "Waiting for the Riot Client window (\(attempt + 1))")
             try await sleep(2.5)
         }
         guard focused else {
-            throw StepError(message: "Could not bring the Riot Client forward to type into it. Is its window open on this Space?")
+            showSelf()
+            throw StepError(message: "Could not bring the Riot Client forward to type into it. Is its window open on the same desktop as League Vault?")
         }
 
-        set(index, .signingIn, "Typing the login")
-        try await sleep(1)
+        // No published updates between confirming focus and typing — a redraw can pull
+        // focus back to us.
+        try await sleep(0.5)
         Autofill.signIn(username: username, password: password)
+        try await sleep(0.4)
+        showSelf()
+        set(index, .signingIn, "Typed — waiting for sign-in")
 
         // 3. Wait for the RSO session to appear.
         set(index, .signingIn, "Waiting for sign-in")
@@ -288,6 +298,17 @@ final class CycleRunner: ObservableObject {
                  ? "\(items[index].name): challenge badges cleared."
                  : "\(items[index].name): challenge reset was partly refused.")
         }
+    }
+
+    // MARK: Our own window
+
+    /// Hide League Vault so synthetic keystrokes go to the Riot Client, not to us.
+    private func hideSelf() { NSApplication.shared.hide(nil) }
+
+    /// Bring League Vault back so its progress list is visible again.
+    private func showSelf() {
+        NSApplication.shared.unhide(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     // MARK: Small helpers
