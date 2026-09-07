@@ -35,6 +35,11 @@ enum Autofill {
             guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
                   let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
             else { continue }
+            // Force no modifiers on every character. Otherwise a Command flag left over
+            // from a Cmd-A clear turns each keystroke into a shortcut (Cmd-d, Cmd-r, …)
+            // and nothing is typed at all.
+            down.flags = []
+            up.flags = []
             down.keyboardSetUnicodeString(stringLength: 1, unicodeString: &buffer)
             up.keyboardSetUnicodeString(stringLength: 1, unicodeString: &buffer)
             down.post(tap: .cghidEventTap)
@@ -51,25 +56,38 @@ enum Autofill {
     /// the one-off Sign in sheet still fills without ever pressing this.
     static func pressReturn() { tap(36) }
 
-    private static func tap(_ virtualKey: CGKeyCode) {
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false)
-        else { return }
-        down.post(tap: .cghidEventTap)
+    private static func tap(_ virtualKey: CGKeyCode, flags: CGEventFlags = []) {
+        postKey(virtualKey, down: true, flags: flags)
         usleep(30000)
-        up.post(tap: .cghidEventTap)
+        postKey(virtualKey, down: false, flags: flags)
         usleep(60000)
     }
 
-    /// Clears whatever is in the focused field first (Cmd-A, Delete), so a half-typed or
-    /// remembered username does not get prepended to what we type.
+    private static func postKey(_ virtualKey: CGKeyCode, down: Bool, flags: CGEventFlags) {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down)
+        else { return }
+        event.flags = flags
+        event.post(tap: .cghidEventTap)
+    }
+
+    /// Clears whatever is in the focused field first (Select All, Delete), so a remembered
+    /// username does not get prepended to what we type.
+    ///
+    /// The Command key is pressed and released for real. Flagging the 'a' event with
+    /// `.maskCommand` but never sending a Command key-up leaves the modifier stuck down,
+    /// after which every following keystroke is read as a Command shortcut and nothing
+    /// types — which is exactly what went wrong.
     static func clearField() {
-        guard let downA = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-              let upA = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
-        downA.flags = .maskCommand; upA.flags = .maskCommand
-        // 0 is 'a'.
-        downA.post(tap: .cghidEventTap); usleep(20000); upA.post(tap: .cghidEventTap); usleep(40000)
-        tap(51)   // Delete
+        postKey(55, down: true, flags: .maskCommand)    // Command down (55 = Left Command)
+        usleep(20000)
+        postKey(0, down: true, flags: .maskCommand)     // 'a' down while Command is held
+        usleep(12000)
+        postKey(0, down: false, flags: .maskCommand)    // 'a' up
+        usleep(12000)
+        postKey(55, down: false, flags: [])             // Command up — releases the modifier
+        usleep(40000)
+        tap(51)                                          // Delete removes the selection
+        usleep(20000)
     }
 
     /// The Riot Client launcher — not League, not the crash handler. Matched loosely
