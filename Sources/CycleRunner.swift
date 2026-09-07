@@ -135,7 +135,7 @@ final class CycleRunner: ObservableObject {
             } catch let error as StepError {
                 set(index, .failed, error.message)
                 note("\(account.displayName): \(error.message)")
-                // Leave the client signed out before the next one, best effort.
+                // Best effort: sign this account out before the next one. Never quits.
                 _ = await RiotClient.signOut()
             } catch {
                 set(index, .failed, error.localizedDescription)
@@ -156,17 +156,19 @@ final class CycleRunner: ObservableObject {
     private func cycleOne(index: Int, account: Account,
                           username: String, password: String,
                           iconId: Int, setIcon: Bool, clearChallenges: Bool) async throws {
-        // 1. Make sure nobody is signed in, and the Riot Client is up at the login screen.
-        set(index, .signingOut, "Clearing any current session")
-        _ = await RiotClient.signOut()
-        await RiotClient.waitUntilQuit(timeout: Timeout.signOut)
-        try checkCancel()
-
+        // 1. Sign out whoever is signed in, leaving the Riot Client open at its login
+        //    screen. The client is never force-quit.
         set(index, .openingClient, "")
         guard let rcu = await RiotClient.ensureRunning(timeout: Timeout.clientUp) else {
             throw StepError(message: "The Riot Client did not start.")
         }
-        // Let the login window settle and take focus before typing at it.
+        try checkCancel()
+
+        set(index, .signingOut, "Signing out the last account")
+        let signOut = await RiotClient.signOut(timeout: Timeout.signOut)
+        if case .failed(let why) = signOut { throw StepError(message: why) }
+        try checkCancel()
+        // Let the login screen settle and take focus before typing at it.
         try await sleep(4)
 
         // 2. Type the credentials and submit.

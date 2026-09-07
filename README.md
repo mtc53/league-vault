@@ -463,8 +463,8 @@ session starts in, which is `C:\Users\<you>`.
 The **Cycle Accounts** toolbar button signs into each account that has a saved login and
 password, one after another, and for each does the whole round trip unattended:
 
-1. **Signs out** whatever is signed in — the Riot Client's own logout, or quitting it if
-   that is refused.
+1. **Signs out** whatever is signed in — through the Riot Client's own logout. The Riot
+   Client is left open at its login screen and is never force-quit.
 2. **Types the login and submits it** — synthetic keystrokes into the Riot Client, then
    Return.
 3. **Launches League** and waits for its client to answer.
@@ -489,8 +489,10 @@ undocumented local API. That cannot be made bulletproof:
 - It needs **Accessibility permission** (the same one autofill uses) to type at all, and
   the Riot Client and League installed in `/Applications`.
 
-Signing out tries the client's logout endpoint first and falls back to quitting the Riot
-Client and League processes, which drops the session just as surely.
+Signing out uses the Riot Client's own logout endpoint and leaves the client open. If
+that endpoint is not available on your client version there is nothing else it will do —
+it will not force-quit the Riot Client — so that account is marked failed and the run
+continues.
 
 It is off in the sense that nothing starts until you open the sheet, tick the
 “I understand” box, and press **Start cycle**.

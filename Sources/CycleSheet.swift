@@ -68,7 +68,7 @@ struct CycleSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 9) {
-                    step(1, "Sign out whatever is signed in", "The Riot Client's own logout, or quitting it if that is refused.")
+                    step(1, "Sign out whatever is signed in", "Through the Riot Client's own logout — it is left open, never force-quit.")
                     step(2, "Type the login and submit", "Synthetic keystrokes into the Riot Client, then Return.")
                     step(3, "Launch League and refresh", "Rank, last game, champions, wallet, penalties.")
                     step(4, "Quick prep", "Icon and challenge reset — never friends.")

@@ -170,56 +170,52 @@ enum RiotClient {
 
     // MARK: Signing out
 
-    enum SignOutMethod { case endpoint, quit, alreadyOut }
+    enum SignOutResult {
+        case signedOut          // the endpoint logged the account out
+        case alreadyOut         // nobody was signed in to begin with
+        case failed(String)     // could not sign out; the client is left open and running
 
-    /// Tries the client's own logout first, then falls back to quitting the processes,
-    /// which drops the session just as surely. Reports which one did it.
-    static func signOut() async -> SignOutMethod {
-        if let creds = discover() {
-            // Two spellings have shipped over the years; either returning a success is fine.
-            for (method, path) in [("POST", "/rso-auth/v1/session/logout"),
-                                   ("DELETE", "/rso-auth/v1/session")] {
-                if let result = await request(method, path, credentials: creds),
-                   (200..<400).contains(result.status) {
-                    // Give it a moment to actually tear the session down.
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    if case .signedIn = await sessionState(credentials: creds) {
-                        break   // it claimed success but is still in — fall through to quit
-                    }
-                    return .endpoint
+        var isClear: Bool {
+            switch self { case .signedOut, .alreadyOut: return true; case .failed: return false }
+        }
+    }
+
+    /// Signs the current account out through the Riot Client's own logout, and leaves the
+    /// Riot Client running at its login screen. It is never force-quit. If the logout
+    /// endpoint is not available on this client version there is nothing else to try, so
+    /// this reports a failure rather than killing the process.
+    static func signOut(timeout: TimeInterval = 25) async -> SignOutResult {
+        guard let creds = discover() else { return .alreadyOut }   // not running → nobody in
+        if case .signedOut = await sessionState(credentials: creds) { return .alreadyOut }
+
+        // Two spellings have shipped over the years; either draining the session is fine.
+        for (method, path) in [("POST", "/rso-auth/v1/session/logout"),
+                               ("DELETE", "/rso-auth/v1/session")] {
+            if let result = await request(method, path, credentials: creds),
+               (200..<400).contains(result.status) {
+                if await waitUntilSignedOut(credentials: creds, timeout: timeout) {
+                    return .signedOut
                 }
             }
         }
-        quitProcesses()
-        return .quit
+        // One more grace period in case the request landed but was slow to take effect.
+        if await waitUntilSignedOut(credentials: creds, timeout: 5) { return .signedOut }
+
+        return .failed("The Riot Client would not sign out — its logout endpoint may not exist on this version. It has been left open and running, as asked.")
     }
 
-    /// Force-quits the Riot Client and League. The next launch returns to the login screen.
-    static func quitProcesses() {
-        let names = ["LeagueClient", "LeagueClientUx", "Riot Client", "RiotClientServices",
-                     "RiotClientUx", "RiotClientCrashHandler"]
-        let running = NSWorkspace.shared.runningApplications
-        for app in running {
-            let name = app.localizedName ?? ""
-            if names.contains(where: { name.hasPrefix($0) }) {
-                app.terminate()
-            }
-        }
-        // A blunt backstop for helpers NSWorkspace does not list as applications.
-        let kill = Process()
-        kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        kill.arguments = ["-f", "LeagueClientUx|RiotClientServices|RiotClientUx"]
-        kill.standardError = FileHandle.nullDevice
-        try? kill.run()
-        kill.waitUntilExit()
-    }
-
-    /// True once nothing Riot-related is running any more.
-    static func waitUntilQuit(timeout: TimeInterval = 20) async {
+    /// Polls until the session is gone. `.unknown` (both endpoints silent) falls back to
+    /// League having closed as evidence the account is out.
+    private static func waitUntilSignedOut(credentials: RCUCredentials, timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if !isRunning && LCU.discover() == nil { return }
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            switch await sessionState(credentials: credentials) {
+            case .signedOut: return true
+            case .signedIn:  break
+            case .unknown:   if LCU.discover() == nil { return true }
+            }
+            try? await Task.sleep(nanoseconds: 800_000_000)
         }
+        return false
     }
 }
