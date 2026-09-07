@@ -202,6 +202,34 @@ struct LastGame: Codable, Hashable {
         var id: String { rawValue }
     }
 
+    /// Who actually played the last game. Nothing in the client can tell you this —
+    /// a game you played yourself and a game someone else played look identical — so
+    /// it is recorded by hand. It changes what the idle counter means: an account you
+    /// played yesterday is not "in use", it is just an account you used.
+    enum Player: String, Codable, CaseIterable, Identifiable {
+        case unknown = "UNKNOWN"
+        case me = "ME"
+        case someoneElse = "SOMEONE_ELSE"
+
+        var id: String { rawValue }
+
+        var display: String {
+            switch self {
+            case .unknown:     return "Not said"
+            case .me:          return "Me"
+            case .someoneElse: return "Someone else"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .unknown:     return "questionmark.circle"
+            case .me:          return "person.fill"
+            case .someoneElse: return "person.2.fill"
+            }
+        }
+    }
+
     var champion: String = ""
     var queue: String = ""
     var result: Result = .victory
@@ -211,13 +239,17 @@ struct LastGame: Codable, Hashable {
     var durationSeconds: Int = 0
     var playedAt: Date = Date()
     var matchId: String = ""
+    /// Recorded by hand; carried across refreshes for as long as it is the same match.
+    var player: Player = .unknown
 
     init(champion: String = "", queue: String = "", result: Result = .victory,
          kills: Int = 0, deaths: Int = 0, assists: Int = 0,
-         durationSeconds: Int = 0, playedAt: Date = Date(), matchId: String = "") {
+         durationSeconds: Int = 0, playedAt: Date = Date(), matchId: String = "",
+         player: Player = .unknown) {
         self.champion = champion; self.queue = queue; self.result = result
         self.kills = kills; self.deaths = deaths; self.assists = assists
         self.durationSeconds = durationSeconds; self.playedAt = playedAt; self.matchId = matchId
+        self.player = player
     }
 
     init(from decoder: Decoder) throws {
@@ -231,6 +263,7 @@ struct LastGame: Codable, Hashable {
         durationSeconds = (try? c.decodeIfPresent(Int.self, forKey: .durationSeconds)).flatMap { $0 } ?? 0
         playedAt = (try? c.decodeIfPresent(Date.self, forKey: .playedAt)).flatMap { $0 } ?? Date()
         matchId = (try? c.decodeIfPresent(String.self, forKey: .matchId)).flatMap { $0 } ?? ""
+        player = (try? c.decodeIfPresent(Player.self, forKey: .player)).flatMap { $0 } ?? .unknown
     }
 
     var kda: String { "\(kills)/\(deaths)/\(assists)" }
@@ -601,13 +634,46 @@ struct Account: Codable, Identifiable, Hashable {
     var hasCriticalPenalty: Bool { activePenalties.contains { $0.kind.isCritical } }
 
     /// "12 games" / "no games" over the tracked window, or nil when never counted.
+    /// Kept as detail; the headline number is now how long the account has sat idle.
     var recentGamesLabel: String? {
         guard let recentGames else { return nil }
         return recentGames == 0 ? "no games in 3mo" : "\(recentGames) in 3mo"
     }
 
-    /// Nothing played in the window — worth showing differently from a busy account.
-    var isDormant: Bool { recentGames == 0 }
+    /// Whole days since the last recorded game, or nil when no game is on record.
+    var daysSinceLastGame: Int? {
+        guard let played = lastGame?.playedAt else { return nil }
+        return max(0, Calendar.current.dateComponents([.day], from: played, to: Date()).day ?? 0)
+    }
+
+    /// Short badge text: "today", "1d idle", "57d idle", "2.1y idle".
+    var idleLabel: String? {
+        guard let days = daysSinceLastGame else { return nil }
+        if days == 0 { return "today" }
+        if days < 365 { return "\(days)d idle" }
+        return String(format: "%.1fy idle", Double(days) / 365)
+    }
+
+    /// The long form, for tooltips and the detail pane.
+    var idleDescription: String? {
+        guard let days = daysSinceLastGame else { return nil }
+        switch days {
+        case 0:  return "Last game was today"
+        case 1:  return "Last game was yesterday"
+        default: return "Last game was \(days) days ago"
+        }
+    }
+
+    /// Who played it last. Drives whether the idle counter means anything: a game you
+    /// played yourself says nothing about whether anyone else is on the account.
+    var lastGamePlayer: LastGame.Player { lastGame?.player ?? .unknown }
+
+    /// You played it, so the idle counter is only a note to yourself.
+    var idleIsSelfInflicted: Bool { lastGamePlayer == .me }
+
+    /// Untouched for three months by anyone. Still worth flagging separately.
+    static let dormantDays = 90
+    var isDormant: Bool { (daysSinceLastGame ?? Int.max) >= Account.dormantDays }
 
     var activeQueueDelays: [Penalty] {
         activePenalties.filter { $0.kind == .queueDelay }
@@ -631,6 +697,19 @@ struct Account: Codable, Identifiable, Hashable {
     mutating func startDodgeTimer(hours: Int = 24) {
         penalties.removeAll { $0.kind == .dodgeTimer && $0.isActive }
         penalties.append(Account.dodgeTimer(hours: hours))
+    }
+
+    /// Applies a last game read from the client. Who played it is recorded by hand and
+    /// the client cannot know it, so the note is carried across for as long as it is
+    /// still the same match — a genuinely new game starts out unattributed again.
+    mutating func applyLiveLastGame(_ game: LastGame) {
+        var merged = game
+        if let existing = lastGame,
+           !existing.matchId.isEmpty,
+           existing.matchId == game.matchId {
+            merged.player = existing.player
+        }
+        lastGame = merged
     }
 
     /// Replaces penalties the client reported, leaving hand-entered ones untouched.

@@ -325,21 +325,10 @@ final class WebDashboard: ObservableObject {
 
     /// The Windows path the page lands in, spelled the way Explorer spells it.
     var resolvedWindowsPath: String {
-        let folder = remotePath.trimmingCharacters(in: .whitespaces)
-        guard !folder.isEmpty else { return "C:\\LeagueVaultWeb" }
-        if folder.contains(":") || folder.hasPrefix("/") {
-            return folder.replacingOccurrences(of: "/", with: "\\")
-        }
-        let user = remote?.user.isEmpty == false ? remote!.user : "<username>"
-        return "C:\\Users\\\(user)\\" + folder.replacingOccurrences(of: "/", with: "\\")
+        SFTPPath.windows(remotePath, user: remote?.user.isEmpty == false ? remote!.user : "<username>")
     }
 
-    /// sftp always wants forward slashes, even against Windows.
-    private var sftpDirectory: String {
-        let folder = remotePath.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "\\", with: "/")
-        return folder.isEmpty ? "." : folder
-    }
+    private var sftpDirectory: String { SFTPPath.remote(remotePath) }
 
     // MARK: Wiring
 

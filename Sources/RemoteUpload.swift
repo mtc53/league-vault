@@ -1,5 +1,42 @@
 import Foundation
 
+/// Path shapes the Windows OpenSSH server expects.
+///
+/// Its SFTP subsystem exposes drives beneath a single root: `C:\\Backups` is
+/// `/C:/Backups` on the wire. Leave that leading slash off and the server reads the
+/// whole thing as relative and hangs it off the login folder, which is how you end up
+/// asking it for `/C:/Users/Administrator/C:/LeagueVaultWeb`.
+enum SFTPPath {
+    /// What to send to sftp: forward slashes, and a leading slash on any drive path.
+    static func remote(_ raw: String) -> String {
+        let folder = raw.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "\\", with: "/")
+        guard !folder.isEmpty else { return "." }
+        if folder.hasPrefix("/") { return folder }      // already rooted
+        return hasDriveLetter(folder) ? "/" + folder : folder
+    }
+
+    /// What to show the user: the path the way Explorer spells it. A relative path is
+    /// resolved against the login folder, because that is where an SSH session starts.
+    static func windows(_ raw: String, user: String) -> String {
+        var folder = raw.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "/", with: "\\")
+        guard !folder.isEmpty else { return "C:\\Users\\" + user }
+        if folder.hasPrefix("\\") && hasDriveLetter(String(folder.dropFirst())) {
+            folder.removeFirst()                        // "\\C:\\x" is really "C:\\x"
+        }
+        if hasDriveLetter(folder) || folder.hasPrefix("\\\\") { return folder }
+        return "C:\\Users\\" + user + "\\" + folder
+    }
+
+    /// "C:", "c:/x" — a drive letter, not a folder called something with a colon in it.
+    private static func hasDriveLetter(_ path: String) -> Bool {
+        let chars = Array(path)
+        guard chars.count >= 2, chars[1] == ":" else { return false }
+        return chars[0].isLetter
+    }
+}
+
 extension Notification.Name {
     static let vaultDidChange = Notification.Name("LeagueVaultDidChange")
 }
@@ -77,15 +114,7 @@ final class RemoteBackup: ObservableObject {
     /// Windows OpenSSH starts in the user's profile folder, so a relative path hangs off
     /// C:\Users\<user>. An absolute path is passed through as typed.
     var resolvedWindowsPath: String {
-        let folder = remotePath.trimmingCharacters(in: .whitespaces)
-        if folder.isEmpty { return "C:\\Users\\\(user.isEmpty ? "<username>" : user)" }
-        // Already absolute: C:\..., C:/... or /C:/...
-        let looksAbsolute = folder.contains(":") || folder.hasPrefix("/")
-        if looksAbsolute {
-            return folder.replacingOccurrences(of: "/", with: "\\")
-        }
-        let user = self.user.isEmpty ? "<username>" : self.user
-        return "C:\\Users\\\(user)\\" + folder.replacingOccurrences(of: "/", with: "\\")
+        SFTPPath.windows(remotePath, user: user.isEmpty ? "<username>" : user)
     }
 
     var publicKey: String {
@@ -138,25 +167,23 @@ final class RemoteBackup: ObservableObject {
         return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 
-    /// sftp wants forward slashes even when talking to Windows.
-    private var sftpPath: String {
-        let folder = remotePath.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "\\", with: "/")
-        return folder.isEmpty ? "." : folder
-    }
+    private var sftpPath: String { SFTPPath.remote(remotePath) }
 
     /// Builds a folder, one level at a time, so a nested path works too. Each mkdir is
     /// prefixed with "-" so an existing folder is not treated as a failure.
     func makeRemoteDirectory(path: String, target: String) -> (status: Int32, output: String) {
         guard path != "." else { return (0, "") }
 
+        // A server-absolute path keeps its leading slash on every level, or each mkdir
+        // would be issued relative to the login folder instead.
+        let root = path.hasPrefix("/") ? "/" : ""
         var built: [String] = []
         var prefix = ""
         for segment in path.split(separator: "/") {
-            // Keep a drive letter attached to the first real segment: C:/Backups.
+            // Keep a drive letter attached to the first real segment: /C:/Backups.
             prefix = prefix.isEmpty ? String(segment) : prefix + "/" + String(segment)
             if prefix.hasSuffix(":") { continue }        // "C:" alone is not a folder
-            built.append("-mkdir \"\(prefix)\"")
+            built.append("-mkdir \"\(root)\(prefix)\"")
         }
         return runSFTPBatch(built, target: target)
     }
@@ -248,6 +275,9 @@ final class RemoteBackup: ObservableObject {
         let text = output.lowercased()
         if text.contains("usage: sftp") || text.contains("usage: ssh") {
             return "League Vault built a bad command line — this is a bug in the app, not a problem with your server. Please report it."
+        }
+        if text.contains("no such file or directory") {
+            return "The server has no folder at that path. Create it on the Windows machine, or correct the folder setting — remember a plain name is taken relative to your Windows user folder."
         }
         if text.contains("permission denied") {
             return "The server refused the key. The public key is probably not in the right authorized_keys file on Windows — see the setup steps."
