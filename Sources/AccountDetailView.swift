@@ -500,33 +500,20 @@ struct AccountDetailView: View {
                 .font(.system(size: 10))
             }
         } else {
-            Menu {
-                Button("24 hours") { startDodge(hours: 24) }
-                Button("12 hours") { startDodge(hours: 12) }
-                Button("6 hours") { startDodge(hours: 6) }
-                Button("30 minutes") { startDodge(hours: 0, minutes: 30) }
+            Button {
+                startDodge(hours: 24)
             } label: {
-                Label("Dodge timer", systemImage: "arrow.uturn.backward.circle")
+                Label("24h dodge timer", systemImage: "arrow.uturn.backward.circle")
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            .help("Start a 24-hour dodge timer on this account")
         }
     }
 
-    private func startDodge(hours: Int, minutes: Int = 0) {
+    private func startDodge(hours: Int) {
         var updated = account
-        if minutes > 0 {
-            updated.penalties.removeAll { $0.kind == .dodgeTimer && $0.isActive }
-            updated.penalties.append(Penalty(
-                source: .manual, kind: .dodgeTimer,
-                detail: "\(minutes)-minute dodge timer",
-                startedAt: Date(),
-                expiresAt: Date().addingTimeInterval(Double(minutes) * 60)))
-        } else {
-            updated.startDodgeTimer(hours: hours)
-        }
+        updated.startDodgeTimer(hours: hours)
         store.update(updated)
-        onNotify("Dodge timer started — \(minutes > 0 ? "\(minutes) minutes" : "\(hours) hours").", false)
+        onNotify("24-hour dodge timer started.", false)
     }
 
     /// Live-ish countdown; the view redraws whenever the vault changes.
