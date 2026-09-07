@@ -72,14 +72,45 @@ enum Autofill {
         tap(51)   // Delete
     }
 
-    /// Brings the Riot Client forward so the keystrokes land in it.
+    /// The Riot Client launcher — not League, not the crash handler. Matched loosely
+    /// because the visible app has been named "Riot Client" and "RiotClientUx" across
+    /// versions, and its bundle id is com.riotgames.RiotGames.RiotClient.
+    private static func isRiotLauncher(_ app: NSRunningApplication) -> Bool {
+        let name = (app.localizedName ?? "").lowercased()
+        let bid = (app.bundleIdentifier ?? "").lowercased()
+        if name.contains("league") || bid.contains("leagueoflegends") { return false }
+        if name.contains("crash") { return false }
+        return name.contains("riot") || bid.contains("riotgames")
+    }
+
+    private static func riotLauncher() -> NSRunningApplication? {
+        let apps = NSWorkspace.shared.runningApplications.filter(isRiotLauncher)
+        // A window-bearing app first; helpers only as a last resort.
+        return apps.first { $0.activationPolicy == .regular } ?? apps.first
+    }
+
+    /// Brings the Riot Client forward so the keystrokes land in it. Returns whether it is
+    /// now frontmost — `activate()`'s own return value is unreliable, so this checks.
     @discardableResult
     static func focusRiotClient() -> Bool {
-        guard let app = NSWorkspace.shared.runningApplications.first(where: {
-            ($0.localizedName ?? "").hasPrefix("Riot Client")
-                || ($0.bundleIdentifier ?? "").contains("riotgames.RiotClient")
-        }) else { return false }
-        return app.activate()
+        guard riotLauncher() != nil else { return false }
+        for _ in 0..<6 {
+            guard let app = riotLauncher() else { return false }
+            app.unhide()
+            app.activate(options: [.activateAllWindows])
+            usleep(450_000)
+            if let front = NSWorkspace.shared.frontmostApplication, isRiotLauncher(front) {
+                return true
+            }
+        }
+        // Found it but could not confirm it came forward; let the caller decide.
+        return false
+    }
+
+    /// True when the Riot Client is the frontmost app right now.
+    static var riotClientIsFrontmost: Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+        return isRiotLauncher(front)
     }
 
     /// Fills the login form: username, Tab, password. Never presses Return — submitting

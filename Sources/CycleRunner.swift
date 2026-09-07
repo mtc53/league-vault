@@ -171,11 +171,21 @@ final class CycleRunner: ObservableObject {
         // Let the login screen settle and take focus before typing at it.
         try await sleep(4)
 
-        // 2. Type the credentials and submit.
-        set(index, .signingIn, "Typing the login")
-        guard Autofill.focusRiotClient() else {
-            throw StepError(message: "Could not bring the Riot Client forward to type into it.")
+        // 2. Bring the Riot Client forward and type into it. A freshly launched client
+        //    can take a few seconds before its window will accept focus, so keep trying.
+        set(index, .signingIn, "Focusing the Riot Client")
+        var focused = false
+        for attempt in 0..<6 {
+            if Autofill.focusRiotClient() { focused = true; break }
+            try checkCancel()
+            set(index, .signingIn, "Waiting for the Riot Client window (\(attempt + 1))")
+            try await sleep(2.5)
         }
+        guard focused else {
+            throw StepError(message: "Could not bring the Riot Client forward to type into it. Is its window open on this Space?")
+        }
+
+        set(index, .signingIn, "Typing the login")
         try await sleep(1)
         Autofill.signIn(username: username, password: password)
 
