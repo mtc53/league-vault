@@ -181,6 +181,29 @@ enum RiotClient {
         try? process.run()
     }
 
+    // MARK: Closing League
+
+    /// Force-closes only the League client — never the Riot Client. Used to end a session
+    /// before signing out at the Riot Client level.
+    static func killLeague() {
+        for app in NSWorkspace.shared.runningApplications {
+            let name = app.localizedName ?? ""
+            let bid = (app.bundleIdentifier ?? "").lowercased()
+            if name.hasPrefix("LeagueClient") || name.hasPrefix("League of Legends")
+                || bid.contains("leagueoflegends") {
+                app.terminate()
+            }
+        }
+        // Backstop for the helper process NSWorkspace does not list. The pattern matches
+        // only League, not the Riot Client.
+        let kill = Process()
+        kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        kill.arguments = ["-f", "LeagueClientUx|LeagueClient.app/Contents"]
+        kill.standardError = FileHandle.nullDevice
+        try? kill.run()
+        kill.waitUntilExit()
+    }
+
     // MARK: Signing out
 
     enum SignOutResult {

@@ -313,83 +313,29 @@ final class CycleRunner: ObservableObject {
     /// Signs whoever is signed in out, without ever quitting the Riot Client. If League is
     /// up it is done through the League client (which returns to the Riot Client login);
     /// otherwise through the Riot Client's own logout.
+    /// Ends the current session: closes the League client (never the Riot Client), then
+    /// signs the account out at the Riot Client level, leaving it open at its login screen.
     private func signOutCurrent(label: String) async throws {
-        if LCU.discover() != nil {
-            // The reliable sign-out is the League client's own Exit/Sign Out dialog:
-            // click the window's close button, then the Sign Out button. This returns to
-            // the Riot Client's login screen.
-            if await signOutViaLeagueUI(label: label) {
-                let gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
-                if gone {
-                    note("[\(label)] signed out — League closed.")
-                    try await sleep(3)   // let the Riot Client return to its login screen
-                    return
-                }
+        if let lcu = LCU.discover() {
+            note("[\(label)] closing the League client…")
+            _ = await LCU.quitClient(credentials: lcu)
+            var gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
+            if !gone {
+                note("[\(label)] League did not close on request — forcing it.")
+                RiotClient.killLeague()
+                gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
             }
-            // Fall back to the logout endpoints if the UI path did not take.
-            if let lcu = LCU.discover() {
-                note("[\(label)] trying the League client logout endpoints…")
-                _ = await LCU.signOut(credentials: lcu)
-                if await waitUntil(timeout: Timeout.signOut, { LCU.discover() == nil }) {
-                    note("[\(label)] signed out via an endpoint — League closed.")
-                    try await sleep(3)
-                    return
-                }
-            }
-            throw StepError(message: "Could not sign out of the League client (neither the Sign Out dialog nor a logout endpoint worked). The Riot Client was left open, as asked.")
+            note(gone ? "[\(label)] League closed." : "[\(label)] League still running after a forced close.")
         }
 
-        // No League up — use the Riot Client's own logout for whatever session remains.
+        // Sign the account out at the Riot Client, which stays open at its login screen.
         let result = await RiotClient.signOut(timeout: Timeout.signOut)
         note("[\(label)] Riot Client sign-out: \(describe(result))")
-        if case .failed(let why) = result, LCU.discover() != nil {
-            throw StepError(message: why)
+        if case .failed(let why) = result {
+            note("[\(label)] \(why)")
         }
-    }
-
-    /// Drives the League client's Exit/Sign Out dialog: brings League forward, clicks the
-    /// close button in the top-right corner to raise the dialog, then clicks Sign Out.
-    private func signOutViaLeagueUI(label: String) async -> Bool {
-        guard let league = leagueApp() else { return false }
-        let pid = league.processIdentifier
-
-        hideSelf()
-        defer { showSelf() }
-        league.activate(options: [.activateAllWindows])
-        try? await sleep(1.2)
-
-        guard let window = AXControl.mainWindowFrame(pid: pid) else {
-            note("[\(label)] could not read the League window to sign out.")
-            return false
-        }
-        // The close (X) sits in the top-right of the client's custom title bar.
-        AXControl.click(CGPoint(x: window.maxX - 18, y: window.minY + 16))
-        note("[\(label)] clicked the League close button; waiting for the Exit dialog.")
-        try? await sleep(1.5)
-
-        // The dialog offers Exit and Sign Out — click Sign Out.
-        for attempt in 0..<4 {
-            if AXControl.clickPhrase(pid: pid, phrase: "sign out") {
-                note("[\(label)] clicked Sign Out.")
-                return true
-            }
-            try? await sleep(1)
-            if attempt == 1 {
-                // The dialog may not have opened; nudge the close button again.
-                AXControl.click(CGPoint(x: window.maxX - 18, y: window.minY + 16))
-            }
-        }
-        note("[\(label)] the Sign Out button never appeared.")
-        return false
-    }
-
-    /// The running League client, if any.
-    private func leagueApp() -> NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first { app in
-            let n = (app.localizedName ?? "").lowercased()
-            let b = (app.bundleIdentifier ?? "").lowercased()
-            return n.contains("league") || b.contains("leagueoflegends")
-        }
+        // Let the Riot Client settle back on its login screen before the next account.
+        try await sleep(3)
     }
 
     /// Clicks the Riot Client's Play button to launch League. Waits first, because the
