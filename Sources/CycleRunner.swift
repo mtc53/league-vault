@@ -314,23 +314,81 @@ final class CycleRunner: ObservableObject {
     /// up it is done through the League client (which returns to the Riot Client login);
     /// otherwise through the Riot Client's own logout.
     private func signOutCurrent(label: String) async throws {
-        if let lcu = LCU.discover() {
-            note("[\(label)] signing out through the League client…")
-            _ = await LCU.signOut(credentials: lcu)
-            // Signing out closes League; wait for it to go.
-            let gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
-            if gone {
-                note("[\(label)] signed out — League closed.")
-                // Give the Riot Client a moment to return to its login screen.
-                try await sleep(3)
-                return
+        if LCU.discover() != nil {
+            // The reliable sign-out is the League client's own Exit/Sign Out dialog:
+            // click the window's close button, then the Sign Out button. This returns to
+            // the Riot Client's login screen.
+            if await signOutViaLeagueUI(label: label) {
+                let gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
+                if gone {
+                    note("[\(label)] signed out — League closed.")
+                    try await sleep(3)   // let the Riot Client return to its login screen
+                    return
+                }
             }
-            note("[\(label)] League did not close after sign-out; trying the Riot Client logout.")
+            // Fall back to the logout endpoints if the UI path did not take.
+            if let lcu = LCU.discover() {
+                note("[\(label)] trying the League client logout endpoints…")
+                _ = await LCU.signOut(credentials: lcu)
+                if await waitUntil(timeout: Timeout.signOut, { LCU.discover() == nil }) {
+                    note("[\(label)] signed out via an endpoint — League closed.")
+                    try await sleep(3)
+                    return
+                }
+            }
+            throw StepError(message: "Could not sign out of the League client (neither the Sign Out dialog nor a logout endpoint worked). The Riot Client was left open, as asked.")
         }
+
+        // No League up — use the Riot Client's own logout for whatever session remains.
         let result = await RiotClient.signOut(timeout: Timeout.signOut)
         note("[\(label)] Riot Client sign-out: \(describe(result))")
         if case .failed(let why) = result, LCU.discover() != nil {
             throw StepError(message: why)
+        }
+    }
+
+    /// Drives the League client's Exit/Sign Out dialog: brings League forward, clicks the
+    /// close button in the top-right corner to raise the dialog, then clicks Sign Out.
+    private func signOutViaLeagueUI(label: String) async -> Bool {
+        guard let league = leagueApp() else { return false }
+        let pid = league.processIdentifier
+
+        hideSelf()
+        defer { showSelf() }
+        league.activate(options: [.activateAllWindows])
+        try? await sleep(1.2)
+
+        guard let window = AXControl.mainWindowFrame(pid: pid) else {
+            note("[\(label)] could not read the League window to sign out.")
+            return false
+        }
+        // The close (X) sits in the top-right of the client's custom title bar.
+        AXControl.click(CGPoint(x: window.maxX - 18, y: window.minY + 16))
+        note("[\(label)] clicked the League close button; waiting for the Exit dialog.")
+        try? await sleep(1.5)
+
+        // The dialog offers Exit and Sign Out — click Sign Out.
+        for attempt in 0..<4 {
+            if AXControl.clickPhrase(pid: pid, phrase: "sign out") {
+                note("[\(label)] clicked Sign Out.")
+                return true
+            }
+            try? await sleep(1)
+            if attempt == 1 {
+                // The dialog may not have opened; nudge the close button again.
+                AXControl.click(CGPoint(x: window.maxX - 18, y: window.minY + 16))
+            }
+        }
+        note("[\(label)] the Sign Out button never appeared.")
+        return false
+    }
+
+    /// The running League client, if any.
+    private func leagueApp() -> NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first { app in
+            let n = (app.localizedName ?? "").lowercased()
+            let b = (app.bundleIdentifier ?? "").lowercased()
+            return n.contains("league") || b.contains("leagueoflegends")
         }
     }
 
@@ -427,7 +485,13 @@ final class CycleRunner: ObservableObject {
             throw StepError(message: "The account went away mid-cycle.")
         }
         current.applySnapshot(snapshot)
-        store.update(current)
+        store.update(current)     // writes accounts.json
+
+        // Spell out what landed in the vault so the refresh is visibly confirmed.
+        let solo = current.soloRank.shortDisplay
+        let champs = current.ownedChampions.count
+        let be = current.blueEssence.map { "\($0.grouped) BE" } ?? "BE ?"
+        note("[\(current.displayName)] refreshed into the vault — \(current.riotID), level \(current.summonerLevel.map(String.init) ?? "?"), \(solo), \(champs) champs, \(be).")
         return current.displayName
     }
 
