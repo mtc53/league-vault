@@ -1,0 +1,130 @@
+import AppKit
+import ApplicationServices
+
+// Locating and clicking controls inside another app through the Accessibility API.
+//
+// The Riot Client login is an Electron (Chromium) window. Bringing the window forward
+// does not put the keyboard caret in the username field, which is why typing did nothing
+// until the field was clicked by hand. Chromium only publishes its accessibility tree
+// once asked — setting AXManualAccessibility on the app is the documented way to ask —
+// after which the text fields can be found and clicked exactly where they sit.
+enum AXControl {
+
+    struct LoginFields {
+        var username: CGRect?
+        var password: CGRect?
+        var found: Bool { username != nil || password != nil }
+    }
+
+    /// The Riot Client launcher's process id (not League, not the crash handler).
+    static func riotPID() -> pid_t? {
+        let apps = NSWorkspace.shared.runningApplications.filter { app in
+            let n = (app.localizedName ?? "").lowercased()
+            let b = (app.bundleIdentifier ?? "").lowercased()
+            if n.contains("league") || b.contains("leagueoflegends") { return false }
+            if n.contains("crash") { return false }
+            return n.contains("riot") || b.contains("riotgames")
+        }
+        let target = apps.first { $0.activationPolicy == .regular } ?? apps.first
+        return target?.processIdentifier
+    }
+
+    /// Asks an Electron/Chromium app to expose its accessibility tree.
+    private static func enableManualAccessibility(_ app: AXUIElement) {
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
+
+    private static func attr(_ el: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(el, name as CFString, &value) == .success ? value : nil
+    }
+
+    private static func role(_ el: AXUIElement) -> String {
+        (attr(el, kAXRoleAttribute as String) as? String) ?? ""
+    }
+
+    private static func children(_ el: AXUIElement) -> [AXUIElement] {
+        (attr(el, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
+    }
+
+    private static func frame(_ el: AXUIElement) -> CGRect? {
+        guard let posRef = attr(el, kAXPositionAttribute as String),
+              let sizeRef = attr(el, kAXSizeAttribute as String),
+              CFGetTypeID(posRef) == AXValueGetTypeID(),
+              CFGetTypeID(sizeRef) == AXValueGetTypeID() else { return nil }
+        var pos = CGPoint.zero, size = CGSize.zero
+        AXValueGetValue(posRef as! AXValue, .cgPoint, &pos)
+        AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+        guard size.width > 40, size.height > 8, size.height < 120 else { return nil }
+        return CGRect(origin: pos, size: size)
+    }
+
+    /// Depth-first walk collecting the on-screen text fields. The topmost editable field
+    /// is taken as the username; a secure field (or the next field down) as the password.
+    static func loginFields(pid: pid_t) -> LoginFields {
+        let app = AXUIElementCreateApplication(pid)
+        enableManualAccessibility(app)
+
+        var texts: [CGRect] = []
+        var secures: [CGRect] = []
+
+        var stack = children(app)
+        var visited = 0
+        while let el = stack.popLast(), visited < 6000 {
+            visited += 1
+            switch role(el) {
+            case "AXTextField", "AXComboBox":
+                if let f = frame(el) { texts.append(f) }
+            case "AXSecureTextField":
+                if let f = frame(el) { secures.append(f) }
+            default:
+                break
+            }
+            stack.append(contentsOf: children(el))
+        }
+
+        texts.sort { $0.minY < $1.minY }
+        secures.sort { $0.minY < $1.minY }
+
+        var fields = LoginFields()
+        fields.username = texts.first
+        if let secure = secures.first {
+            fields.password = secure
+        } else if texts.count >= 2 {
+            fields.password = texts[1]
+        }
+        return fields
+    }
+
+    /// Retries because Chromium builds its tree a beat after being asked for it.
+    static func loginFieldsWaiting(pid: pid_t, attempts: Int = 6) async -> LoginFields {
+        for _ in 0..<attempts {
+            let fields = loginFields(pid: pid)
+            if fields.found { return fields }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+        return loginFields(pid: pid)
+    }
+
+    // MARK: Clicking
+
+    private static let mouseSource = CGEventSource(stateID: .hidSystemState)
+
+    static func click(_ point: CGPoint) {
+        CGWarpMouseCursorPosition(point)
+        usleep(30_000)
+        let down = CGEvent(mouseEventSource: mouseSource, mouseType: .leftMouseDown,
+                           mouseCursorPosition: point, mouseButton: .left)
+        let up = CGEvent(mouseEventSource: mouseSource, mouseType: .leftMouseUp,
+                         mouseCursorPosition: point, mouseButton: .left)
+        down?.post(tap: .cghidEventTap)
+        usleep(60_000)
+        up?.post(tap: .cghidEventTap)
+        usleep(90_000)
+    }
+
+    static func click(in rect: CGRect) {
+        click(CGPoint(x: rect.midX, y: rect.midY))
+    }
+}

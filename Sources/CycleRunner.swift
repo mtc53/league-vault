@@ -113,10 +113,20 @@ final class CycleRunner: ObservableObject {
             let focused = Autofill.focusRiotClient()
             self.note("focusRiotClient() = \(focused); frontmost now: \(self.frontmostName())")
             try? await Task.sleep(nanoseconds: 400_000_000)
+            if let pid = AXControl.riotPID() {
+                let fields = await AXControl.loginFieldsWaiting(pid: pid)
+                self.note("login fields — username: \(fields.username != nil ? "found" : "not found"), password: \(fields.password != nil ? "found" : "not found")")
+                if let user = fields.username {
+                    AXControl.click(in: user)
+                    usleep(200_000)
+                }
+            } else {
+                self.note("could not find the Riot Client process id.")
+            }
             Autofill.type("LeagueVaultTest")
             try? await Task.sleep(nanoseconds: 500_000_000)
             self.showSelf()
-            self.note("Done. Did “LeagueVaultTest” appear in the Riot Client's username box?")
+            self.note("Done. Did “LeagueVaultTest” land in the username box on its own this time?")
         }
     }
 
@@ -228,9 +238,9 @@ final class CycleRunner: ObservableObject {
 
         // No published updates between confirming focus and typing — a redraw can pull
         // focus back to us.
-        note("[\(account.displayName)] Riot Client focused (frontmost: \(frontmostName())). Typing \(username.count)-char login.")
+        note("[\(account.displayName)] Riot Client focused (frontmost: \(frontmostName())). Locating the login fields…")
         try await sleep(0.5)
-        Autofill.signIn(username: username, password: password)
+        await typeLogin(username: username, password: password, label: account.displayName)
         try await sleep(0.4)
         showSelf()
         set(index, .signingIn, "Typed — waiting for sign-in")
@@ -261,6 +271,43 @@ final class CycleRunner: ObservableObject {
         if let web, web.isEnabled, web.isConfigured {
             set(index, .publishing, "")
             _ = await web.publish(reason: "account cycle")
+        }
+    }
+
+    /// Puts the caret in the username field by clicking it — focusing the window is not
+    /// enough for an Electron form — then types, clicks the password field (or Tabs to it
+    /// if it could not be located), types that, and submits.
+    private func typeLogin(username: String, password: String, label: String) async {
+        guard let pid = AXControl.riotPID() else {
+            note("[\(label)] could not find the Riot Client process for the click. Typing blind.")
+            Autofill.signIn(username: username, password: password)
+            return
+        }
+        let fields = await AXControl.loginFieldsWaiting(pid: pid)
+
+        if let user = fields.username {
+            note("[\(label)] clicking the username field.")
+            AXControl.click(in: user)
+            usleep(200_000)
+            Autofill.clearField()
+            Autofill.type(username)
+
+            if let pass = fields.password {
+                AXControl.click(in: pass)
+                usleep(200_000)
+                Autofill.clearField()
+                Autofill.type(password)
+            } else {
+                note("[\(label)] no password field found — Tabbing from the username field.")
+                Autofill.pressTab()
+                Autofill.type(password)
+            }
+            usleep(150_000)
+            Autofill.pressReturn()
+        } else {
+            note("[\(label)] the login fields were not exposed by the client — typing blind after a Tab.")
+            Autofill.pressTab()
+            Autofill.signIn(username: username, password: password)
         }
     }
 
