@@ -127,4 +127,49 @@ enum AXControl {
     static func click(in rect: CGRect) {
         click(CGPoint(x: rect.midX, y: rect.midY))
     }
+
+    // MARK: Buttons
+
+    private static func title(_ el: AXUIElement) -> String {
+        let t = (attr(el, kAXTitleAttribute as String) as? String) ?? ""
+        let d = (attr(el, kAXDescriptionAttribute as String) as? String) ?? ""
+        let v = (attr(el, kAXValueAttribute as String) as? String) ?? ""
+        return "\(t) \(d) \(v)"
+    }
+
+    /// The word appears as a whole token, so "play" does not match "player" or "replay".
+    private static func hasWord(_ text: String, _ word: String) -> Bool {
+        text.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .contains(Substring(word.lowercased()))
+    }
+
+    /// Finds a control whose label is (or contains, as a whole word) one of `words` and
+    /// clicks it. Used for the Riot Client's Play button, which launches League.
+    @discardableResult
+    static func clickControl(pid: pid_t, words: [String]) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        enableManualAccessibility(app)
+
+        var best: (rect: CGRect, isButton: Bool)?
+        var stack = children(app)
+        var visited = 0
+        while let el = stack.popLast(), visited < 8000 {
+            visited += 1
+            let label = title(el)
+            if !label.trimmingCharacters(in: .whitespaces).isEmpty,
+               words.contains(where: { hasWord(label, $0) }),
+               let f = frame(el) {
+                let isButton = role(el) == "AXButton"
+                if best == nil || (isButton && !(best!.isButton)) {
+                    best = (f, isButton)
+                }
+                if isButton { break }   // a real button is the best match; stop looking
+            }
+            stack.append(contentsOf: children(el))
+        }
+        guard let target = best else { return false }
+        click(in: target.rect)
+        return true
+    }
 }

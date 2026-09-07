@@ -346,6 +346,29 @@ enum LCU {
                               credentials: credentials)
     }
 
+    /// Signs the account out from inside the League client, which closes League and drops
+    /// back to the Riot Client's login screen — the same as clicking Sign Out in the app.
+    /// The exact endpoint has moved across patches, so a few known spellings are tried and
+    /// the first that is accepted wins. Returns whether one was accepted.
+    @discardableResult
+    static func signOut(credentials: LCUCredentials) async -> Bool {
+        let candidates: [(String, String)] = [
+            ("POST", "/lol-login/v1/session/invalidate"),
+            ("POST", "/lol-login/v1/logout"),
+            ("DELETE", "/lol-login/v1/session"),
+            ("POST", "/lol-rso-auth/v1/session/invalidate"),
+            ("POST", "/rso-auth/v1/session/logout"),
+            // Last resort: restart the client's UX back to the Riot Client login.
+            ("POST", "/riotclient/kill-and-restart-ux")
+        ]
+        for (method, path) in candidates {
+            if (try? await request(method, path, timeout: 6, credentials: credentials)) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
     struct ProbeResult {
         let path: String
         let status: Int      // 0 when the request never completed

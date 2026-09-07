@@ -176,7 +176,7 @@ final class CycleRunner: ObservableObject {
                 set(index, .failed, error.message)
                 note("\(account.displayName): \(error.message)")
                 // Best effort: sign this account out before the next one. Never quits.
-                _ = await RiotClient.signOut()
+                try? await signOutCurrent(label: account.displayName)
             } catch {
                 set(index, .failed, error.localizedDescription)
             }
@@ -185,7 +185,7 @@ final class CycleRunner: ObservableObject {
         // Tidy up: sign the last account out so nothing is left logged in.
         if !Task.isCancelled {
             set(nil, .signingOut, "")
-            _ = await RiotClient.signOut()
+            try? await signOutCurrent(label: "cleanup")
         }
         finish(interrupted: Task.isCancelled)
         if !Task.isCancelled { note("Cycle complete.") }
@@ -208,9 +208,7 @@ final class CycleRunner: ObservableObject {
         try checkCancel()
 
         set(index, .signingOut, "Signing out the last account")
-        let signOut = await RiotClient.signOut(timeout: Timeout.signOut)
-        note("[\(account.displayName)] sign-out: \(describe(signOut))")
-        if case .failed(let why) = signOut { throw StepError(message: why) }
+        try await signOutCurrent(label: account.displayName)
         try checkCancel()
         // Let the login screen settle and take focus before typing at it.
         try await sleep(4)
@@ -249,9 +247,9 @@ final class CycleRunner: ObservableObject {
         set(index, .signingIn, "Waiting for sign-in")
         try await waitForSignIn(rcu: rcu)
 
-        // 4. Launch League and wait for its client to answer.
-        set(index, .launchingLeague, "")
-        RiotClient.launchLeague()
+        // 4. Click Play in the Riot Client to launch League, then wait for its client.
+        set(index, .launchingLeague, "Clicking Play")
+        await launchLeague(label: account.displayName)
         set(index, .waitingForClient, "")
         let credentials = try await waitForLeague()
 
@@ -309,6 +307,60 @@ final class CycleRunner: ObservableObject {
             Autofill.pressTab()
             Autofill.signIn(username: username, password: password)
         }
+    }
+
+    /// Signs whoever is signed in out, without ever quitting the Riot Client. If League is
+    /// up it is done through the League client (which returns to the Riot Client login);
+    /// otherwise through the Riot Client's own logout.
+    private func signOutCurrent(label: String) async throws {
+        if let lcu = LCU.discover() {
+            note("[\(label)] signing out through the League client…")
+            _ = await LCU.signOut(credentials: lcu)
+            // Signing out closes League; wait for it to go.
+            let gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
+            if gone {
+                note("[\(label)] signed out — League closed.")
+                // Give the Riot Client a moment to return to its login screen.
+                try await sleep(3)
+                return
+            }
+            note("[\(label)] League did not close after sign-out; trying the Riot Client logout.")
+        }
+        let result = await RiotClient.signOut(timeout: Timeout.signOut)
+        note("[\(label)] Riot Client sign-out: \(describe(result))")
+        if case .failed(let why) = result, LCU.discover() != nil {
+            throw StepError(message: why)
+        }
+    }
+
+    /// Clicks the Riot Client's Play button to launch League. Retries because the button
+    /// only appears once the game view has loaded after sign-in. Falls back to the
+    /// RiotClientServices launch arguments if the button cannot be found.
+    private func launchLeague(label: String) async {
+        guard let pid = AXControl.riotPID() else {
+            RiotClient.launchLeague(); return
+        }
+        for attempt in 0..<8 {
+            if LCU.discover() != nil { return }         // already launching
+            if AXControl.clickControl(pid: pid, words: ["play"]) {
+                note("[\(label)] clicked Play.")
+                return
+            }
+            set(nil, .launchingLeague, "Waiting for the Play button (\(attempt + 1))")
+            try? await sleep(2)
+        }
+        note("[\(label)] Play button not found — launching League directly.")
+        RiotClient.launchLeague()
+    }
+
+    /// Polls `condition` until it is true or the deadline passes.
+    private func waitUntil(timeout: TimeInterval, _ condition: @escaping () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+        return condition()
     }
 
     // MARK: Waits
