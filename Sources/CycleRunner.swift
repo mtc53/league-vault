@@ -47,8 +47,9 @@ final class CycleRunner: ObservableObject {
         static let clientUp: TimeInterval = 45      // Riot Client API answers
         static let signIn: TimeInterval = 60        // RSO session appears after submit
         static let leagueUp: TimeInterval = 150     // LCU answers with a summoner
-        static let signOut: TimeInterval = 25
+        static let signOut: TimeInterval = 30
         static let afterSignIn: TimeInterval = 10   // let the game view load before Play
+        static let afterSignOut: TimeInterval = 10  // settle on the login screen before next
     }
 
     private weak var store: AccountStore?
@@ -326,6 +327,8 @@ final class CycleRunner: ObservableObject {
                 gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
             }
             note(gone ? "[\(label)] League closed." : "[\(label)] League still running after a forced close.")
+            // Let the Riot Client settle back to its game screen before asking it to log out.
+            try await sleep(5)
         }
 
         // Sign the account out at the Riot Client, which stays open at its login screen.
@@ -334,8 +337,11 @@ final class CycleRunner: ObservableObject {
         if case .failed(let why) = result {
             note("[\(label)] \(why)")
         }
-        // Let the Riot Client settle back on its login screen before the next account.
-        try await sleep(3)
+
+        // A pause on the Riot Client's login screen before the next account starts, so it
+        // is fully settled and nothing from the last account bleeds into the next.
+        set(nil, .signingOut, "Settling before the next account")
+        try await sleep(Timeout.afterSignOut)
     }
 
     /// Clicks the Riot Client's Play button to launch League. Waits first, because the

@@ -114,14 +114,18 @@ enum RiotClient {
 
     enum SessionState { case signedIn(puuid: String), signedOut, unknown }
 
-    /// Is someone signed in? The access-token endpoint answers 200 with a token once the
-    /// RSO session exists, and 404/4xx before that.
+    /// Is someone signed in? The active-alias endpoint is authoritative: a 200 carrying a
+    /// puuid means signed in, and a 200 without one (or a 4xx) means signed out — even if
+    /// the access token lingers for a moment. Only when that request cannot be reached at
+    /// all do we fall back to the access token, and then to unknown.
     static func sessionState(credentials: RCUCredentials) async -> SessionState {
-        if let alias = await request("GET", "/player-account/aliases/v1/active", credentials: credentials),
-           alias.status == 200,
-           let object = try? JSONSerialization.jsonObject(with: alias.data) as? [String: Any],
-           let puuid = object["puuid"] as? String, !puuid.isEmpty {
-            return .signedIn(puuid: puuid)
+        if let alias = await request("GET", "/player-account/aliases/v1/active", credentials: credentials) {
+            if alias.status == 200,
+               let object = try? JSONSerialization.jsonObject(with: alias.data) as? [String: Any],
+               let puuid = object["puuid"] as? String, !puuid.isEmpty {
+                return .signedIn(puuid: puuid)
+            }
+            return .signedOut
         }
         if let token = await request("GET", "/rso-auth/v1/authorization/access-token", credentials: credentials) {
             return token.status == 200 ? .signedIn(puuid: "") : .signedOut
@@ -216,28 +220,41 @@ enum RiotClient {
         }
     }
 
-    /// Signs the current account out through the Riot Client's own logout, and leaves the
-    /// Riot Client running at its login screen. It is never force-quit. If the logout
-    /// endpoint is not available on this client version there is nothing else to try, so
-    /// this reports a failure rather than killing the process.
-    static func signOut(timeout: TimeInterval = 25) async -> SignOutResult {
+    /// Every logout spelling that has shipped, tried together each round.
+    private static let logoutEndpoints: [(String, String)] = [
+        ("POST", "/rso-auth/v1/session/logout"),
+        ("DELETE", "/rso-auth/v1/session"),
+        ("POST", "/rso-auth/v2/session/logout"),
+        ("DELETE", "/rso-auth/v2/session"),
+        ("PUT", "/rso-auth/v1/authorization/logout"),
+        ("POST", "/riot-login/v1/session/logout")
+    ]
+
+    /// Signs the current account out through the Riot Client's own logout, leaving the Riot
+    /// Client running at its login screen — never force-quit. Fires every known logout
+    /// endpoint each round and keeps retrying until the session is gone or the timeout
+    /// passes, so a slow or fussy client still signs out. The failure message carries the
+    /// status codes it saw, for diagnosis.
+    static func signOut(timeout: TimeInterval = 30) async -> SignOutResult {
         guard let creds = discover() else { return .alreadyOut }   // not running → nobody in
         if case .signedOut = await sessionState(credentials: creds) { return .alreadyOut }
 
-        // Two spellings have shipped over the years; either draining the session is fine.
-        for (method, path) in [("POST", "/rso-auth/v1/session/logout"),
-                               ("DELETE", "/rso-auth/v1/session")] {
-            if let result = await request(method, path, credentials: creds),
-               (200..<400).contains(result.status) {
-                if await waitUntilSignedOut(credentials: creds, timeout: timeout) {
-                    return .signedOut
+        var seen: [String] = []
+        let deadline = Date().addingTimeInterval(timeout)
+        var round = 0
+        while Date() < deadline {
+            round += 1
+            for (method, path) in logoutEndpoints {
+                let result = await request(method, path, credentials: creds)
+                if round == 1 {
+                    seen.append("\(method) \(path.split(separator: "/").last ?? "") → \(result.map { String($0.status) } ?? "no reply")")
                 }
             }
+            // Give the client a moment, then check.
+            if await waitUntilSignedOut(credentials: creds, timeout: 4) { return .signedOut }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
-        // One more grace period in case the request landed but was slow to take effect.
-        if await waitUntilSignedOut(credentials: creds, timeout: 5) { return .signedOut }
-
-        return .failed("The Riot Client would not sign out — its logout endpoint may not exist on this version. It has been left open and running, as asked.")
+        return .failed("The Riot Client would not sign out. Endpoints tried: \(seen.joined(separator: "; ")). It has been left open and running, as asked.")
     }
 
     /// Polls until the session is gone. `.unknown` (both endpoints silent) falls back to
