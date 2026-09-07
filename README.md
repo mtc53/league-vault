@@ -458,6 +458,43 @@ travels as `/C:/LeagueVaultWeb`. League Vault adds that leading slash for you �
 path the ordinary way. A path with no drive letter is taken relative to the folder an SSH
 session starts in, which is `C:\Users\<you>`.
 
+## Cycling every account
+
+The **Cycle Accounts** toolbar button signs into each account that has a saved login and
+password, one after another, and for each does the whole round trip unattended:
+
+1. **Signs out** whatever is signed in — the Riot Client's own logout, or quitting it if
+   that is refused.
+2. **Types the login and submits it** — synthetic keystrokes into the Riot Client, then
+   Return.
+3. **Launches League** and waits for its client to answer.
+4. **Refreshes** the account — rank, last game, champions, wallet, penalties.
+5. **Runs quick prep** — profile icon and challenge reset. **Never friends.**
+6. **Publishes** the web dashboard, if it is turned on, and moves to the next.
+
+A live list shows every account and the stage it is at; **Stop** ends the run after the
+current step. Each account is independent — one that stalls is marked failed and the
+cycle carries on.
+
+### What it cannot promise
+
+Steps 1–3 drive the **Riot Client**, a separate program, through keystrokes and its
+undocumented local API. That cannot be made bulletproof:
+
+- A **captcha**, a **2FA prompt**, or a **“stay signed in” dialog** will stop a sign-in.
+  The account is marked failed after a minute and the cycle goes on.
+- It **types wherever the keyboard is pointed.** Leave the Mac alone while it runs —
+  moving the mouse or typing can land a login in the wrong window. Nothing is ever
+  submitted twice.
+- It needs **Accessibility permission** (the same one autofill uses) to type at all, and
+  the Riot Client and League installed in `/Applications`.
+
+Signing out tries the client's logout endpoint first and falls back to quitting the Riot
+Client and League processes, which drops the session just as surely.
+
+It is off in the sense that nothing starts until you open the sheet, tick the
+“I understand” box, and press **Start cycle**.
+
 ## Refreshing by itself
 
 Settings → **Refresh by itself**, on by default.

@@ -37,6 +37,9 @@ final class ClientWatcher: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private var loop: Task<Void, Never>?
+    /// Held while the account cycle drives the client itself, so the two do not fight
+    /// over the same sign-in.
+    private(set) var isSuspended = false
     /// The sign-in already handed over, so the same one is not offered twice.
     private var handledPuuid: String?
 
@@ -81,9 +84,22 @@ final class ClientWatcher: ObservableObject {
         status = "Not watching."
     }
 
+    /// The cycle takes over sign-ins while it runs; the watcher stands down.
+    func suspend() {
+        isSuspended = true
+        pending = nil
+        status = "Paused while the account cycle runs."
+    }
+
+    func resume() {
+        isSuspended = false
+        handledPuuid = nil          // re-offer whoever is signed in now
+        status = isClientRunning ? "Watching." : "Waiting for the League client…"
+    }
+
     /// One poll. Returns how long to wait before the next one.
     private func tick() async -> UInt64 {
-        guard isEnabled else { return Pace.idle }
+        guard isEnabled, !isSuspended else { return Pace.idle }
 
         guard let credentials = LCU.discover() else {
             if isClientRunning {

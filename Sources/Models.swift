@@ -712,6 +712,32 @@ struct Account: Codable, Identifiable, Hashable {
         lastGame = merged
     }
 
+    /// Folds a snapshot read from the client into this account: identity, rank (peak
+    /// preserved), last game (attribution preserved), champions, wallet, honor and the
+    /// client-reported penalties. Hand-entered penalties and peaks are left alone.
+    mutating func applySnapshot(_ snapshot: LCU.Snapshot) {
+        let me = snapshot.summoner
+        puuid = me.puuid
+        applyRiotID(gameName: me.gameName, tagLine: me.tagLine)
+        summonerLevel = me.summonerLevel
+        if let icon = me.profileIconId { profileIconId = icon }
+        if let region = snapshot.region { self.region = region }
+        for entry in snapshot.ranks { applyLiveRank(entry) }
+        if let game = snapshot.lastGame { applyLiveLastGame(game) }
+        if !snapshot.champions.isEmpty { ownedChampions = snapshot.champions }
+        if let be = snapshot.blueEssence { blueEssence = be }
+        if let rp = snapshot.riotPoints { riotPoints = rp }
+        if let count = snapshot.recentGames {
+            recentGames = count
+            recentGamesAsOf = Date()
+        }
+        if let honor = snapshot.honor {
+            honorLevel = honor.level
+            replaceClientPenalties(with: LCU.penalties(from: snapshot.behaviour ?? LCU.BehaviourSnapshot(honor: honor)))
+        }
+        lastRefreshed = Date()
+    }
+
     /// Replaces penalties the client reported, leaving hand-entered ones untouched.
     mutating func replaceClientPenalties(with detected: [Penalty]) {
         penalties.removeAll { $0.source == .client }

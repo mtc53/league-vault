@@ -44,15 +44,32 @@ enum Autofill {
         }
     }
 
-    /// Virtual key codes: Tab is 48, Return is 36 (unused — filling is not submitting).
-    static func pressTab() {
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 48, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 48, keyDown: false)
+    /// Virtual key codes: Tab is 48, Return is 36.
+    static func pressTab() { tap(48) }
+
+    /// Submits the form. Used only by the account cycle, which the user drives knowingly —
+    /// the one-off Sign in sheet still fills without ever pressing this.
+    static func pressReturn() { tap(36) }
+
+    private static func tap(_ virtualKey: CGKeyCode) {
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false)
         else { return }
         down.post(tap: .cghidEventTap)
         usleep(30000)
         up.post(tap: .cghidEventTap)
         usleep(60000)
+    }
+
+    /// Clears whatever is in the focused field first (Cmd-A, Delete), so a half-typed or
+    /// remembered username does not get prepended to what we type.
+    static func clearField() {
+        guard let downA = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+              let upA = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
+        downA.flags = .maskCommand; upA.flags = .maskCommand
+        // 0 is 'a'.
+        downA.post(tap: .cghidEventTap); usleep(20000); upA.post(tap: .cghidEventTap); usleep(40000)
+        tap(51)   // Delete
     }
 
     /// Brings the Riot Client forward so the keystrokes land in it.
@@ -75,5 +92,20 @@ enum Autofill {
         if !password.isEmpty {
             type(password)
         }
+    }
+
+    /// Fills and submits, clearing each field first. Used by the account cycle only.
+    static func signIn(username: String, password: String) {
+        if !username.isEmpty {
+            clearField()
+            type(username)
+            pressTab()
+        }
+        if !password.isEmpty {
+            clearField()
+            type(password)
+        }
+        usleep(150000)
+        pressReturn()
     }
 }

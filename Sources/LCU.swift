@@ -35,7 +35,7 @@ struct LCUSummoner {
 }
 
 /// Accepts the client's self-signed certificate, and only ever for loopback.
-private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate {
+final class LoopbackTrustDelegate: NSObject, URLSessionDelegate {
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

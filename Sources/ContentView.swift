@@ -20,6 +20,7 @@ struct ContentView: View {
     @EnvironmentObject var store: AccountStore
     @EnvironmentObject var web: WebDashboard
     @EnvironmentObject var watcher: ClientWatcher
+    @EnvironmentObject var cycle: CycleRunner
 
     @State private var selection: UUID?
     @State private var search = ""
@@ -34,6 +35,7 @@ struct ContentView: View {
     @State private var editing: Account?
     @State private var creatingNew = false
     @State private var importingCombos = false
+    @State private var showCycle = false
     @State private var showSettings = false
     @State private var showClient = false
     @State private var refreshingIDs: Set<UUID> = []
@@ -179,6 +181,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showClient) {
             ClientSheet().environmentObject(store)
+        }
+        .sheet(isPresented: $showCycle) {
+            CycleSheet()
+                .environmentObject(store)
+                .environmentObject(cycle)
         }
         .sheet(item: $newFolderTarget) { account in
             NameFolderSheet(title: "New Folder", initial: "") { name in
@@ -568,6 +575,11 @@ struct ContentView: View {
             }
             .help("Connect to the running League client: rename your Riot ID, or import the signed-in account")
 
+            Button { showCycle = true } label: {
+                Label("Cycle Accounts", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .help("Sign into every account in turn, refresh it and run quick prep")
+
             Button { showSettings = true } label: {
                 Label("Settings", systemImage: "gearshape")
             }
@@ -711,27 +723,7 @@ struct ContentView: View {
 
     private func apply(_ snapshot: LCU.Snapshot, to account: Account) -> Account? {
         guard var current = store.accounts.first(where: { $0.id == account.id }) else { return nil }
-        let me = snapshot.summoner
-        current.puuid = me.puuid
-        current.applyRiotID(gameName: me.gameName, tagLine: me.tagLine)
-        current.summonerLevel = me.summonerLevel
-        if let icon = me.profileIconId { current.profileIconId = icon }
-        if let region = snapshot.region { current.region = region }
-        for entry in snapshot.ranks { current.applyLiveRank(entry) }
-        if let game = snapshot.lastGame { current.applyLiveLastGame(game) }
-        if !snapshot.champions.isEmpty { current.ownedChampions = snapshot.champions }
-        if let be = snapshot.blueEssence { current.blueEssence = be }
-        if let rp = snapshot.riotPoints { current.riotPoints = rp }
-        if let count = snapshot.recentGames {
-            current.recentGames = count
-            current.recentGamesAsOf = Date()
-        }
-        if let honor = snapshot.honor {
-            current.honorLevel = honor.level
-            // Only client-reported penalties are replaced; hand-entered ones stay.
-            current.replaceClientPenalties(with: LCU.penalties(from: snapshot.behaviour ?? LCU.BehaviourSnapshot(honor: honor)))
-        }
-        current.lastRefreshed = Date()
+        current.applySnapshot(snapshot)
         store.update(current)
         return current
     }

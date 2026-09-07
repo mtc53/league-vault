@@ -7,6 +7,7 @@ struct LeagueVaultApp: App {
     @StateObject private var remote = RemoteServer()
     @StateObject private var web = WebDashboard()
     @StateObject private var watcher = ClientWatcher()
+    @StateObject private var cycle = CycleRunner()
 
     init() {
         Self.forgetTheBackupFeature()
@@ -32,7 +33,11 @@ struct LeagueVaultApp: App {
                 .environmentObject(remote)
                 .environmentObject(web)
                 .environmentObject(watcher)
-                .task { web.attach(to: store, remote: remote) }
+                .environmentObject(cycle)
+                .task {
+                    web.attach(to: store, remote: remote)
+                    cycle.attach(store: store, web: web, watcher: watcher)
+                }
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
