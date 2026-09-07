@@ -33,6 +33,7 @@ struct ContentView: View {
     @State private var groupByFolder = true
     @State private var editing: Account?
     @State private var creatingNew = false
+    @State private var importingCombos = false
     @State private var showSettings = false
     @State private var showClient = false
     @State private var refreshingIDs: Set<UUID> = []
@@ -157,6 +158,13 @@ struct ContentView: View {
             AccountEditor(account: Account(), isNew: true, knownFolders: allFolders) { saved in
                 store.add(saved)
                 selection = saved.id
+            }
+            .environmentObject(store)
+        }
+        .sheet(isPresented: $importingCombos) {
+            ComboImportSheet(knownFolders: allFolders) { result in
+                banner = Banner(text: comboImportSummary(result),
+                                isError: result.added == 0 && result.malformed > 0)
             }
             .environmentObject(store)
         }
@@ -564,10 +572,21 @@ struct ContentView: View {
                 Label("Settings", systemImage: "gearshape")
             }
 
-            Button { creatingNew = true } label: {
+            Menu {
+                Button { creatingNew = true } label: {
+                    Label("Add one account…", systemImage: "person.badge.plus")
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                Button { importingCombos = true } label: {
+                    Label("Import combo list…", systemImage: "square.and.arrow.down.on.square")
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            } label: {
                 Label("Add Account", systemImage: "plus")
+            } primaryAction: {
+                creatingNew = true
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .help("Add one account, or import a username;password combo list")
         }
     }
 
@@ -600,6 +619,23 @@ struct ContentView: View {
                 withAnimation { self.banner = nil }
             }
         }
+    }
+
+    // MARK: Combo import
+
+    private func comboImportSummary(_ r: AccountStore.ComboImportResult) -> String {
+        if r.added == 0 {
+            if r.total > 0 { return "Nothing new — all \(r.total) accounts were already in the vault." }
+            if r.malformed > 0 { return "No accounts imported — no line was in username;password form." }
+            return "No accounts found in that file."
+        }
+        var text = "Imported \(r.added) account\(r.added == 1 ? "" : "s")."
+        var skipped: [String] = []
+        if r.duplicates > 0 { skipped.append("\(r.duplicates) already here") }
+        if r.malformed > 0 { skipped.append("\(r.malformed) malformed") }
+        if !skipped.isEmpty { text += " Skipped " + skipped.joined(separator: ", ") + "." }
+        text += " Sign in to each in the client to fill in the rest."
+        return text
     }
 
     // MARK: Automatic refresh

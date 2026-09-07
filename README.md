@@ -47,6 +47,29 @@ field for anything you want to set by hand.
 | Login username + password | you |
 | Penalties | you — see below |
 
+### Importing a combo list
+
+**Add ▸ Import combo list…** (⌘O) takes a plain `.txt` with one account per line in the
+form:
+
+```
+username;password
+```
+
+Only the first semicolon splits the line, so a password may contain more of them. Blank
+lines and lines starting with `#` are ignored. A username already in the vault is
+skipped, as is a username that repeats within the file, so re-importing a longer list
+only adds what is new.
+
+Before it commits, the sheet shows how many accounts are new, how many were skipped as
+duplicates, and any lines that had no `;` — with their line numbers, so a malformed file
+is easy to fix. You can drop the batch into a folder on the way in.
+
+Passwords are encrypted as they are stored, exactly like a password typed by hand.
+Everything else about each imported account fills itself in the first time it signs in to
+the client and is refreshed.
+
+
 ## Idle time
 
 Every account carries one number: **how many days since the last game anyone played on

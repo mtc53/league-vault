@@ -220,6 +220,49 @@ final class AccountStore: ObservableObject {
         save()
     }
 
+    // MARK: Combo-list import
+
+    struct ComboImportResult {
+        var added = 0
+        /// Skipped because the username is already in the vault.
+        var duplicates = 0
+        /// Lines that had no separator or no username.
+        var malformed = 0
+        var total: Int { added + duplicates }
+    }
+
+    /// Adds every pair whose username is not already stored, filing them under `folder`
+    /// (empty for unfiled). Passwords are encrypted on the way in, the same as any other
+    /// stored password; each new account is left unidentified so it adopts a Riot ID,
+    /// rank and the rest the first time it signs in and is refreshed.
+    @discardableResult
+    func importCombos(_ parsed: ComboImport.Parsed, folder: String = "") -> ComboImportResult {
+        var result = ComboImportResult()
+        result.malformed = parsed.malformed.count
+
+        var known = Set(accounts.map { $0.loginUsername.lowercased() })
+        var newcomers: [Account] = []
+        for pair in parsed.pairs {
+            let key = pair.username.lowercased()
+            guard !known.contains(key) else { result.duplicates += 1; continue }
+            known.insert(key)
+
+            var account = Account()
+            account.loginUsername = pair.username
+            account.folder = folder
+            account.encryptedPassword = pair.password.isEmpty ? nil : encrypt(pair.password)
+            account.normalize()
+            newcomers.append(account)
+            result.added += 1
+        }
+
+        if !newcomers.isEmpty {
+            accounts.append(contentsOf: newcomers)
+            save()
+        }
+        return result
+    }
+
     // MARK: Passwords
 
     func password(for account: Account) -> String? {
