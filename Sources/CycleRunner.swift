@@ -46,8 +46,9 @@ final class CycleRunner: ObservableObject {
     private struct Timeout {
         static let clientUp: TimeInterval = 45      // Riot Client API answers
         static let signIn: TimeInterval = 60        // RSO session appears after submit
-        static let leagueUp: TimeInterval = 120     // LCU answers with a summoner
+        static let leagueUp: TimeInterval = 150     // LCU answers with a summoner
         static let signOut: TimeInterval = 25
+        static let afterSignIn: TimeInterval = 10   // let the game view load before Play
     }
 
     private weak var store: AccountStore?
@@ -333,24 +334,39 @@ final class CycleRunner: ObservableObject {
         }
     }
 
-    /// Clicks the Riot Client's Play button to launch League. Retries because the button
-    /// only appears once the game view has loaded after sign-in. Falls back to the
-    /// RiotClientServices launch arguments if the button cannot be found.
+    /// Clicks the Riot Client's Play button to launch League. Waits first, because the
+    /// button appears before the client is ready and an early click does nothing, then
+    /// clicks and verifies League actually starts (its client appears), clicking again if
+    /// it did not. Falls back to the RiotClientServices launch arguments as a last resort.
     private func launchLeague(label: String) async {
+        // Let the Riot Client finish loading its game view after sign-in.
+        set(nil, .launchingLeague, "Letting the client finish loading")
+        try? await sleep(Timeout.afterSignIn)
+
         guard let pid = AXControl.riotPID() else {
             RiotClient.launchLeague(); return
         }
+
         for attempt in 0..<8 {
-            if LCU.discover() != nil { return }         // already launching
-            if AXControl.clickControl(pid: pid, words: ["play"]) {
-                note("[\(label)] clicked Play.")
+            if LCU.discover() != nil {
+                note("[\(label)] League is starting.")
                 return
             }
-            set(nil, .launchingLeague, "Waiting for the Play button (\(attempt + 1))")
-            try? await sleep(2)
+            if AXControl.clickControl(pid: pid, words: ["play"]) {
+                note("[\(label)] clicked Play (attempt \(attempt + 1)).")
+            } else {
+                note("[\(label)] Play button not visible yet (attempt \(attempt + 1)).")
+            }
+            set(nil, .launchingLeague, "Launching League (\(attempt + 1))")
+            // Give the click time to register and League a chance to begin launching
+            // before deciding it did not take.
+            try? await sleep(6)
         }
-        note("[\(label)] Play button not found — launching League directly.")
-        RiotClient.launchLeague()
+
+        if LCU.discover() == nil {
+            note("[\(label)] Play did not start League — launching directly.")
+            RiotClient.launchLeague()
+        }
     }
 
     /// Polls `condition` until it is true or the deadline passes.
