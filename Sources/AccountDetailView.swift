@@ -89,9 +89,15 @@ struct AccountDetailView: View {
                     if let level = account.summonerLevel {
                         Chip(text: "Level \(level)", color: .secondary)
                     }
-                    if let count = account.recentGames {
-                        Chip(text: count == 0 ? "No games in 3 months" : "\(count) games in 3 months",
-                             color: count == 0 ? .secondary : .accentColor)
+                    if let described = account.idleDescription {
+                        Chip(text: described,
+                             color: account.idleIsSelfInflicted ? .secondary
+                                    : (account.isDormant ? .orange : .accentColor))
+                            .help(account.idleIsSelfInflicted
+                                  ? "You played it, so this says nothing about whether anyone else has been on the account."
+                                  : "Days since the last game the client reported.")
+                    } else {
+                        Chip(text: "Never played", color: .secondary)
                     }
                     if let honor = account.honorLevel {
                         Chip(text: "Honor \(honor)", color: honor >= 3 ? .green : .orange)
@@ -403,6 +409,34 @@ struct AccountDetailView: View {
                         LabeledValue(label: "Played", value: game.playedAt.shortDisplay)
                     }
 
+                    Divider()
+
+                    // The client cannot tell a game you played from one someone else
+                    // played, so this is recorded by hand. It decides whether the idle
+                    // counter on the sidebar means anything.
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Who played it")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .textCase(.uppercase)
+                        Picker("", selection: playerBinding) {
+                            ForEach(LastGame.Player.allCases) { who in
+                                Label(who.display, systemImage: who.symbol).tag(who)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 340)
+                        Text(game.player == .me
+                             ? "Marked as yours, so the idle counter is greyed out — it only tells you when you last played it."
+                             : (game.player == .someoneElse
+                                ? "Marked as someone else's, so the idle counter tracks how long since anyone was on it."
+                                : "Say who played it and the idle counter is tinted to match."))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     if !game.matchId.isEmpty {
                         Text(game.matchId)
                             .font(.system(size: 10, design: .monospaced))
@@ -411,11 +445,23 @@ struct AccountDetailView: View {
                     }
                 }
             } else {
-                Text("No game recorded yet. Refresh from the Riot API, or add one in Edit.")
+                Text("No game recorded yet. Refresh with the League client signed in to this account, or add one in Edit.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Writes through immediately — this is a live control, not part of the editor.
+    private var playerBinding: Binding<LastGame.Player> {
+        Binding(
+            get: { account.lastGame?.player ?? .unknown },
+            set: { who in
+                guard var updated = store.accounts.first(where: { $0.id == account.id }),
+                      updated.lastGame != nil else { return }
+                updated.lastGame?.player = who
+                store.update(updated)
+            })
     }
 
     private var penaltiesCard: some View {

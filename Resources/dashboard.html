@@ -207,7 +207,7 @@ select:focus{border-color:#3a3d63}
 .list{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--panel)}
 .list .hdr,.row{
   display:grid;
-  grid-template-columns:minmax(190px,1.7fr) 130px 64px 96px 96px 84px 100px 92px 96px;
+  grid-template-columns:minmax(190px,1.7fr) 130px 64px 96px 96px 84px 112px 92px 96px;
   gap:12px;align-items:center;padding:0 14px;
 }
 .list .hdr{
@@ -344,7 +344,7 @@ footer{padding:26px 22px 40px;text-align:center;color:var(--dim);font:11px/1.6 v
 
   <div class="hero">
     <h1>My League <em>accounts</em></h1>
-    <div class="sub">Every account in the vault &mdash; rank, champion pool, wallet and anything currently holding it back. Read straight out of the League client and published from the Mac.</div>
+    <div class="sub">Every account in the vault &mdash; rank, champion pool, wallet, how long it has sat untouched, and anything currently holding it back. Read out of the League client, published from the Mac.</div>
     <div class="totals" id="totals"></div>
   </div>
 
@@ -366,7 +366,7 @@ footer{padding:26px 22px 40px;text-align:center;color:var(--dim);font:11px/1.6 v
           <option value="be">Most blue essence</option>
           <option value="rp">Most RP</option>
           <option value="recent">Recently played</option>
-          <option value="active">Most active (3mo)</option>
+          <option value="idle">Longest idle</option>
           <option value="name">Name A&ndash;Z</option>
           <option value="folder">Folder</option>
         </select>
@@ -377,7 +377,8 @@ footer{padding:26px 22px 40px;text-align:center;color:var(--dim);font:11px/1.6 v
         <select id="fTier"></select>
         <select id="fAccess"></select>
         <select id="fStatus"></select>
-        <select id="fActivity"></select>
+        <select id="fIdle"></select>
+        <select id="fPlayer"></select>
         <select id="fChamp"></select>
       </div>
       <div class="chips" id="chips"></div>
@@ -527,9 +528,9 @@ async function loadChampions() {
 /* ------------------------------------------------------------------ *
  *  Filter state
  * ------------------------------------------------------------------ */
-const FILTER_KEYS = ["q", "folder", "region", "tier", "access", "status", "activity", "champ"];
+const FILTER_KEYS = ["q", "folder", "region", "tier", "access", "status", "idle", "player", "champ"];
 const state = {
-  q: "", folder: "", region: "", tier: "", access: "", status: "", activity: "", champ: "",
+  q: "", folder: "", region: "", tier: "", access: "", status: "", idle: "", player: "", champ: "",
   sort: localStorage.getItem("lv.sort") || "rank",
   view: localStorage.getItem("lv.view") || "grid"
 };
@@ -560,8 +561,14 @@ function fillSelects(accounts) {
     option("__delay", "Queue delay"), option("__dodge", "Dodge timer"),
     option("__ban", "Suspended or banned"));
 
-  $("#fActivity").replaceChildren(option("", "Any activity"), option("__active", "Played in 3 months"),
-    option("__dormant", "Dormant (0 in 3mo)"), option("__unknown", "Never refreshed"));
+  $("#fIdle").replaceChildren(option("", "Any idle time"),
+    option("__7", "Idle under a week"), option("__30", "Idle over a month"),
+    option("__90", "Idle over 3 months"), option("__365", "Idle over a year"),
+    option("__never", "Never played"));
+
+  $("#fPlayer").replaceChildren(option("", "Played by anyone"),
+    option("ME", "Last played by me"), option("SOMEONE_ELSE", "Last played by someone else"),
+    option("__unsaid", "Not said who played"));
 
   $("#fChamp").replaceChildren(option("", "Any champion"),
     ...uniq(accounts.flatMap(a => a.champions.map(c => c.name))).map(c => option(c, c)));
@@ -603,10 +610,19 @@ function matches(a) {
     if (state.status === "__dodge" && !live.some(p => p.kind === "Dodge timer")) return false;
     if (state.status === "__ban"   && !live.some(p => p.kind === "Temporary suspension" || p.kind === "Permanent ban")) return false;
   }
-  if (state.activity) {
-    if (state.activity === "__unknown" && a.recentGames != null) return false;
-    if (state.activity === "__active"  && !(a.recentGames > 0)) return false;
-    if (state.activity === "__dormant" && a.recentGames !== 0) return false;
+  if (state.idle) {
+    if (state.idle === "__never") {
+      if (a.idleDays != null) return false;
+    } else {
+      if (a.idleDays == null) return false;
+      const min = Number(state.idle.slice(2));
+      if (min === 7 ? a.idleDays >= 7 : a.idleDays < min) return false;
+    }
+  }
+  if (state.player) {
+    const who = a.lastGame && a.lastGame.player;
+    if (state.player === "__unsaid") { if (who) return false; }
+    else if (who !== state.player) return false;
   }
   if (state.champ && !a.champions.some(c => c.name === state.champ)) return false;
   return true;
@@ -621,7 +637,7 @@ function sortKey(a) {
     case "champs": return -a.champions.length;
     case "be":     return -(a.be || 0);
     case "rp":     return -(a.rp || 0);
-    case "active": return -(a.recentGames == null ? -1 : a.recentGames);
+    case "idle":   return -(a.idleDays == null ? -1 : a.idleDays);
     case "recent": return -(a.lastGame ? new Date(a.lastGame.playedAt).getTime() : 0);
     case "name":   return a.name.toLowerCase();
     case "folder": return (a.folder || "zzzz") + " " + a.name.toLowerCase();
@@ -664,10 +680,28 @@ function accessPill(a) {
   if (a.access === "NFA") return '<span class="pill nfa">NFA</span>';
   return "";
 }
-function activityPill(a) {
-  if (a.recentGames == null) return '<span class="pill ghost">? in 3mo</span>';
-  if (a.recentGames === 0)   return '<span class="pill dormant">Dormant</span>';
-  return '<span class="pill ghost">' + a.recentGames + ' in 3mo</span>';
+/* Days since anyone played it. Greyed out when the account's owner played that game
+   himself — the number then says nothing about whether anyone else has been on it. */
+function idlePill(a) {
+  if (a.idleDays == null) return '<span class="pill dormant">Never played</span>';
+  const mine = a.lastGame && a.lastGame.player === "ME";
+  const label = a.idleDays === 0 ? "Played today"
+              : a.idleDays === 1 ? "1 day idle"
+              : a.idleDays < 365 ? a.idleDays + " days idle"
+              : (a.idleDays / 365).toFixed(1) + " years idle";
+  const cls = mine ? "dormant" : (a.idleDays >= 90 ? "warn" : "ghost");
+  return '<span class="pill ' + cls + '" title="' + esc(idleTitle(a)) + '">'
+       + (mine ? "\u25CF " : "") + esc(label) + '</span>';
+}
+function idleTitle(a) {
+  if (a.idleDays == null) return "No game on record for this account.";
+  const who = a.lastGame && a.lastGame.player;
+  const base = a.idleDays === 0 ? "Last game was today"
+             : a.idleDays === 1 ? "Last game was yesterday"
+             : "Last game was " + a.idleDays + " days ago";
+  if (who === "ME") return base + ", played by you — so this says nothing about whether anyone else has been on it.";
+  if (who === "SOMEONE_ELSE") return base + ", played by someone else.";
+  return base + ". Who played it has not been recorded.";
 }
 
 function card(a) {
@@ -695,11 +729,13 @@ function card(a) {
     + '<span><b>' + a.champions.length + '</b> champs</span>'
     + '<span><b>' + num(a.be) + '</b> BE</span>'
     + '<span><b>' + num(a.rp) + '</b> RP</span>'
-    + (a.lastGame ? '<span><b>' + esc(a.lastGame.champion) + '</b> ' + esc(ago(a.lastGame.playedAt)) + '</span>'
+    + (a.lastGame ? '<span><b>' + esc(a.lastGame.champion) + '</b> ' + esc(ago(a.lastGame.playedAt))
+                    + (a.lastGame.player === "ME" ? " · you"
+                       : a.lastGame.player === "SOMEONE_ELSE" ? " · someone else" : "") + '</span>'
                   : '<span>no game recorded</span>')
     + '</div>'
     + '<div class="meta"><span class="pill region">' + esc(a.region.short) + '</span>'
-    + accessPill(a) + activityPill(a) + statusPills(a) + '</div>'
+    + accessPill(a) + idlePill(a) + statusPills(a) + '</div>'
     + '</div>';
   node.addEventListener("click", () => openSheet(a.id));
   return node;
@@ -718,7 +754,9 @@ function row(a) {
     + '<div class="num"><b>' + a.champions.length + '</b> champs</div>'
     + '<div class="num"><b>' + num(a.be) + '</b> BE</div>'
     + '<div class="num"><b>' + num(a.rp) + '</b> RP</div>'
-    + '<div class="num">' + (a.lastGame ? esc(ago(a.lastGame.playedAt)) : "—") + '</div>'
+    + '<div class="num">' + (a.idleDays == null ? "—"
+        : '<b>' + a.idleDays + '</b> days'
+          + (a.lastGame && a.lastGame.player === "ME" ? ' <span style="opacity:.6">you</span>' : "")) + '</div>' 
     + '<div>' + (crit ? '<span class="pill bad"><span class="dot"></span>' + esc(crit.kind) + '</span>'
                       : (a.penalties.some(p => p.active) ? '<span class="pill warn">Penalty</span>'
                                                          : '<span class="pill live">Clear</span>')) + '</div>'
@@ -740,7 +778,7 @@ function render() {
     const list = el("div", "list");
     list.append(el("div", "hdr",
       '<div>Account</div><div>Solo/Duo</div><div class="num">Level</div><div class="num">Champions</div>'
-      + '<div class="num">Blue essence</div><div class="num">RP</div><div class="num">Last game</div>'
+      + '<div class="num">Blue essence</div><div class="num">RP</div><div class="num">Idle</div>'
       + '<div>Status</div><div style="text-align:right">Server</div>'));
     for (const a of rows) list.append(row(a));
     scroller.append(list);
@@ -757,13 +795,15 @@ function render() {
 
 const CHIP_LABEL = {
   q: "Search", folder: "Folder", region: "Server", tier: "Rank",
-  access: "Access", status: "Status", activity: "Activity", champ: "Champion"
+  access: "Access", status: "Status", idle: "Idle", player: "Last played by", champ: "Champion"
 };
 const CHIP_VALUE = {
   "__ranked": "Ranked", "__none": "Not recorded", "__clean": "Nothing wrong",
   "__any": "Has a penalty", "__crit": "Blocked", "__delay": "Queue delay",
-  "__dodge": "Dodge timer", "__ban": "Suspended", "__active": "Played in 3mo",
-  "__dormant": "Dormant", "__unknown": "Never refreshed"
+  "__dodge": "Dodge timer", "__ban": "Suspended",
+  "__7": "Under a week", "__30": "Over a month", "__90": "Over 3 months",
+  "__365": "Over a year", "__never": "Never played",
+  "ME": "Me", "SOMEONE_ELSE": "Someone else", "__unsaid": "Not said"
 };
 CHIP_VALUE[UNFILED] = "Unfiled";
 
@@ -796,8 +836,9 @@ function renderChips() {
 function syncSelects() {
   $("#fFolder").value = state.folder; $("#fRegion").value = state.region;
   $("#fTier").value = state.tier;     $("#fAccess").value = state.access;
-  $("#fStatus").value = state.status; $("#fActivity").value = state.activity;
-  $("#fChamp").value = state.champ;   $("#sort").value = state.sort;
+  $("#fStatus").value = state.status; $("#fIdle").value = state.idle;
+  $("#fPlayer").value = state.player; $("#fChamp").value = state.champ;
+  $("#sort").value = state.sort;
 }
 
 /* ------------------------------------------------------------------ *
@@ -840,7 +881,7 @@ function openSheet(id) {
     + '<div class="pills">'
     + '<span class="pill region">' + esc(a.region.short) + ' · ' + esc(a.region.long) + '</span>'
     + (a.folder ? '<span class="pill ghost">' + esc(a.folder) + '</span>' : "")
-    + accessPill(a) + activityPill(a)
+    + accessPill(a) + idlePill(a)
     + (a.level ? '<span class="pill ghost">Level ' + a.level + '</span>' : "")
     + (a.honor != null ? '<span class="pill ghost">Honor ' + a.honor + '</span>' : "")
     + '</div>'
@@ -852,7 +893,7 @@ function openSheet(id) {
     + '<div><span>Blue essence</span><b>' + num(a.be) + '</b></div>'
     + '<div><span>Riot points</span><b>' + num(a.rp) + '</b></div>'
     + '<div><span>Champions</span><b>' + a.champions.length + '</b></div>'
-    + '<div><span>Games (3mo)</span><b>' + (a.recentGames == null ? "—" : a.recentGames) + '</b></div>'
+    + '<div><span>Days idle</span><b>' + (a.idleDays == null ? "—" : a.idleDays) + '</b></div>' 
     + '<div><span>Last game</span><b>' + (a.lastGame ? esc(ago(a.lastGame.playedAt)) : "—") + '</b></div>'
     + '<div><span>Last refreshed</span><b>' + (a.lastRefreshed ? esc(ago(a.lastRefreshed)) : "never") + '</b></div>'
     + '</div></div>'
@@ -866,6 +907,9 @@ function openSheet(id) {
         + '<div><span>KDA</span><b>' + esc(a.lastGame.kda) + '</b></div>'
         + '<div><span>Length</span><b>' + esc(a.lastGame.duration) + '</b></div>'
         + '<div><span>Played</span><b>' + esc(ago(a.lastGame.playedAt)) + '</b></div>'
+        + '<div><span>Played by</span><b>'
+          + (a.lastGame.player === "ME" ? "You"
+             : a.lastGame.player === "SOMEONE_ELSE" ? "Someone else" : "—") + '</b></div>' 
         + '</div></div>' : "")
 
     + '<div class="sect"><h3>Penalties</h3>'
@@ -926,6 +970,10 @@ function renderTotals() {
     : "—";
   const blocked = A.filter(a => a.penalties.some(p => p.active && p.critical)).length;
   const pool = new Set(A.flatMap(a => a.champions.map(c => c.name))).size;
+  // Games you played yourself are left out: they say nothing about an account sitting.
+  const idle = A.filter(a => a.idleDays != null && !(a.lastGame && a.lastGame.player === "ME"))
+                .map(a => a.idleDays);
+  const longest = idle.length ? Math.max(...idle) : null;
 
   const items = [
     ["Accounts", A.length, false],
@@ -933,6 +981,7 @@ function renderTotals() {
     ["Blue essence", num(sum("be")), false],
     ["Riot points", num(sum("rp")), false],
     ["Champions seen", pool, false],
+    ["Longest idle", longest == null ? "—" : longest + "d", false],
     ["Blocked right now", blocked, blocked > 0]
   ];
   $("#totals").replaceChildren(...items.map(([k, v, alarm]) => {
@@ -946,8 +995,8 @@ function wire() {
   $("#q").addEventListener("input", e => { state.q = e.target.value; render(); });
   const bind = (sel, key) => $(sel).addEventListener("change", e => { state[key] = e.target.value; render(); });
   bind("#fFolder", "folder"); bind("#fRegion", "region"); bind("#fTier", "tier");
-  bind("#fAccess", "access"); bind("#fStatus", "status"); bind("#fActivity", "activity");
-  bind("#fChamp", "champ");
+  bind("#fAccess", "access"); bind("#fStatus", "status"); bind("#fIdle", "idle");
+  bind("#fPlayer", "player"); bind("#fChamp", "champ");
   $("#sort").addEventListener("change", e => {
     state.sort = e.target.value;
     try { localStorage.setItem("lv.sort", state.sort); } catch (err) {}

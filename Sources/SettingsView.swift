@@ -5,17 +5,15 @@ struct SettingsView: View {
     @EnvironmentObject var store: AccountStore
     @Environment(\.dismiss) private var dismiss
 
-    @EnvironmentObject var remote: RemoteBackup
+    @EnvironmentObject var remote: RemoteServer
     @EnvironmentObject var web: WebDashboard
+    @EnvironmentObject var watcher: ClientWatcher
 
     @State private var includePasswordsInExport = false
-    @State private var passphrase = ""
-    @State private var passphraseConfirm = ""
-    @State private var showPassphrase = false
     @State private var testing = false
     @State private var testOK: Bool?
-    @State private var restoreMessage: String?
-    @State private var restoreIsError = false
+    @State private var serverMessage: String?
+    @State private var serverIsError = false
 
     @State private var webPassphrase = ""
     @State private var showWebPassphrase = false
@@ -80,6 +78,10 @@ struct SettingsView: View {
                                 .foregroundStyle(.orange)
                         }
                     }
+
+                    Divider()
+
+                    watcherSection
 
                     Divider()
 
@@ -257,42 +259,69 @@ struct SettingsView: View {
         .onAppear { webPassphrase = web.passphrase ?? "" }
     }
 
-    // MARK: Remote server
+    // MARK: Automatic refresh
+
+    private var watcherSection: some View {
+        FormSection("Refresh by itself") {
+            Toggle("Refresh whichever account signs in to the League client", isOn: $watcher.isEnabled)
+                .toggleStyle(.checkbox)
+            Text("League Vault watches for the client and refreshes the matching entry the moment somebody signs in — rank, last game, champions, wallet, penalties. Switching accounts inside the client refreshes the new one too.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(watcher.isClientRunning ? Color.green : Color.secondary.opacity(0.5))
+                    .frame(width: 7, height: 7)
+                Text(watcher.status)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if watcher.isEnabled && watcher.isClientRunning {
+                    Button("Refresh now") { watcher.forgetHandled() }
+                        .controlSize(.small)
+                }
+            }
+
+            if let last = watcher.lastHandled {
+                Text("Last picked up a sign-in \(last.relativeDisplay).")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            Text(web.isEnabled
+                 ? "The web dashboard is republished straight after each automatic refresh."
+                 : "Turn on “Republish whenever the vault changes” below to have the page follow along.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("An entry added with only a login adopts whoever signs in, as long as it is the only one waiting. With two of them waiting League Vault will not guess — refresh one by hand to link it.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: The server
 
     private var serverSection: some View {
-        FormSection("Back up to your server") {
-            Toggle("Upload automatically", isOn: $remote.isEnabled)
-                .toggleStyle(.checkbox)
+        FormSection("Your server") {
+            Text("Where the web dashboard is published. League Vault reaches it over SSH with a key, the same way you would from Terminal — nothing else is sent to it.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
-                Field("Server address") { TextField("203.0.113.10", text: $remote.host) }
+                Field("Server address") { TextField("4098.duckdns.org", text: $remote.host) }
                 Field("Port") {
                     TextField("22", value: $remote.port, format: .number)
                 }
                 .frame(width: 70)
                 Field("Windows username") { TextField("Administrator", text: $remote.user) }
             }
-            Field("Folder on the server") {
-                TextField("LeagueVaultBackups", text: $remote.remotePath)
-            }
-            HStack(spacing: 6) {
-                Image(systemName: "folder")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                Text("Files land in \(remote.resolvedWindowsPath)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                Spacer()
-            }
-            Text("A plain name hangs off your Windows user folder, because that is where an SSH session starts. Type a full path like C:\\Backups to put it elsewhere.")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
 
-            Divider().padding(.vertical, 2)
-
-            // The key is what lets uploads run without a password sitting in a config.
+            // The key is what lets publishing run without a password sitting in a config.
             HStack(spacing: 10) {
                 if remote.hasKey {
                     Label("SSH key ready", systemImage: "checkmark.seal.fill")
@@ -300,8 +329,8 @@ struct SettingsView: View {
                         .foregroundStyle(.green)
                     Button("Copy public key") {
                         Clipboard.copy(remote.publicKey)
-                        restoreMessage = "Public key copied — paste it into the server's authorized_keys."
-                        restoreIsError = false
+                        serverMessage = "Public key copied — paste it into the server's authorized_keys."
+                        serverIsError = false
                     }
                 } else {
                     Button("Create key") { _ = remote.createKeyIfNeeded() }
@@ -312,66 +341,6 @@ struct SettingsView: View {
                 Spacer()
             }
 
-            Field("Backup passphrase") {
-                HStack(spacing: 6) {
-                    if showPassphrase {
-                        TextField("", text: $passphrase)
-                    } else {
-                        SecureField("", text: $passphrase)
-                    }
-                    Button { showPassphrase.toggle() } label: {
-                        Image(systemName: showPassphrase ? "eye.slash" : "eye")
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            if !showPassphrase {
-                Field("Confirm passphrase") { SecureField("", text: $passphraseConfirm) }
-            }
-            HStack(spacing: 10) {
-                Button("Save passphrase") {
-                    remote.passphrase = passphrase
-                    restoreMessage = "Passphrase saved."
-                    restoreIsError = false
-                }
-                .disabled(passphrase.isEmpty || (!showPassphrase && passphrase != passphraseConfirm))
-                if !showPassphrase && !passphraseConfirm.isEmpty && passphrase != passphraseConfirm {
-                    Text("Passphrases do not match.").font(.system(size: 11)).foregroundStyle(.red)
-                }
-                Spacer()
-            }
-            Text("⚠︎ Write this passphrase down somewhere that is not this Mac. Backups are encrypted with it and nothing else — lose the Mac and the passphrase together and the files cannot be opened by anyone.")
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider().padding(.vertical, 2)
-
-            HStack(spacing: 10) {
-                Field("Every") {
-                    Picker("", selection: $remote.intervalMinutes) {
-                        Text("15 minutes").tag(15)
-                        Text("Hour").tag(60)
-                        Text("6 hours").tag(360)
-                        Text("Day").tag(1440)
-                        Text("Only on change").tag(0)
-                    }
-                    .labelsHidden()
-                }
-                .frame(width: 150)
-                Field("Keep") {
-                    Picker("", selection: $remote.keepCount) {
-                        ForEach([10, 20, 50, 100], id: \.self) { Text("\($0) copies").tag($0) }
-                    }
-                    .labelsHidden()
-                }
-                .frame(width: 130)
-                Spacer()
-            }
-            Text("An upload also runs 30 seconds after any change to the vault.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-
             HStack(spacing: 10) {
                 Button {
                     Task { testing = true; testOK = await remote.testConnection(); testing = false }
@@ -380,14 +349,6 @@ struct SettingsView: View {
                     else { Text("Test connection") }
                 }
                 .disabled(testing || remote.host.isEmpty)
-
-                Button("Upload now") {
-                    Task { _ = await remote.upload(reason: "manual") }
-                }
-                .disabled(remote.isBusy || !remote.isConfigured)
-
-                Button("Restore from server…") { restoreFromServer() }
-                    .disabled(!remote.isConfigured)
                 Spacer()
             }
 
@@ -397,48 +358,17 @@ struct SettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(testOK ? .green : .red)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            if let error = remote.lastError, testOK == nil {
+            } else if let error = remote.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if let last = remote.lastUpload {
-                Text("Last upload \(last.relativeDisplay)" + (remote.lastFileName.map { " · \($0)" } ?? ""))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
             }
-            if let restoreMessage {
-                Label(restoreMessage, systemImage: restoreIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+            if let serverMessage {
+                Label(serverMessage, systemImage: serverIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(restoreIsError ? .red : .green)
+                    .foregroundStyle(serverIsError ? .red : .green)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .onAppear { passphrase = remote.passphrase ?? ""; passphraseConfirm = passphrase }
-    }
-
-    private func restoreFromServer() {
-        Task {
-            do {
-                let (envelope, records) = try await remote.fetchLatest(passphrase: remote.passphrase ?? "")
-                let prompt = NSAlert()
-                prompt.messageText = "Restore \(envelope.accountCount) account\(envelope.accountCount == 1 ? "" : "s")?"
-                prompt.informativeText = "From \(envelope.origin), \(envelope.createdAt.shortDisplay).\n\nMerge adds accounts this Mac does not have. Replace discards the local vault entirely."
-                prompt.addButton(withTitle: "Merge")
-                prompt.addButton(withTitle: "Replace")
-                prompt.addButton(withTitle: "Cancel")
-                let choice = prompt.runModal()
-                guard choice != .alertThirdButtonReturn else { return }
-                let mode: AccountStore.RestoreMode = choice == .alertSecondButtonReturn ? .replace : .merge
-                let result = store.restore(records, mode: mode)
-                restoreIsError = false
-                restoreMessage = mode == .replace
-                    ? "Replaced the vault with \(result.added) accounts."
-                    : "Added \(result.added), left \(result.kept) already here untouched."
-            } catch {
-                restoreIsError = true
-                restoreMessage = error.localizedDescription
             }
         }
     }

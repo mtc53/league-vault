@@ -42,23 +42,40 @@ field for anything you want to set by hand.
 | Rank (Solo/Duo + Flex), LP, W/L | Refresh, or by hand |
 | Last played game (champion, queue, result, KDA, length, time) | Refresh, or by hand |
 | Summoner level, profile icon | Refresh |
-| Games in the last 3 months | Refresh |
+| Days since the last game | Refresh |
+| Who played that game (me / someone else) | you |
 | Login username + password | you |
 | Penalties | you — see below |
 
-## Activity
+## Idle time
 
-Each sidebar row carries a badge with how many games the account has played in the last
-three months — `12 in 3mo`, or a grey `no games in 3mo` for a dormant one. An account
-that has never been counted shows a dashed `? in 3mo` instead: the badge is visible so
-the feature is not invisible, but it never fabricates a zero for something it has not
-measured. Refresh the account with the client signed in to it and the real number
-replaces it.
+Every account carries one number: **how many days since the last game anyone played on
+it.** It is on the sidebar row, on the detail header, on the web dashboard's cards and
+list, and it is a sort option (**Days idle**) in both.
 
-The count comes from the client's match history, walked a page at a time and stopped as
-soon as it passes the ninety-day mark, so it does not read a whole history to answer the
-question. Sorting by **Games (3mo)** orders the list by it, with never-counted accounts
-last.
+The number comes from the last game the client reported, so it only moves when the
+account is refreshed. An account with no game on record shows a dashed **never played**
+rather than a fabricated zero.
+
+Past three months untouched, the badge turns amber.
+
+### Who played it
+
+The client cannot tell a game you played from a game somebody else played — they look
+identical — so you say which, in the account's **Last Played Game** card: **Me**,
+**Someone else**, or leave it at **Not said**.
+
+It changes what the idle number means. Marked as yours, the badge greys out and gets a
+dot: you already know when you last played it, and that says nothing about whether anyone
+else has been on the account. Marked as someone else's, the badge stays lit, because then
+it is genuinely tracking how long the account has sat.
+
+The note survives refreshes for as long as it is the same match. A genuinely new game
+starts out unattributed again, because nothing about the new game tells League Vault who
+was at the keyboard.
+
+The web dashboard filters on it — **Last played by me / by someone else / not said** —
+and its **Longest idle** headline leaves out the games you played yourself.
 
 ## Folders
 
@@ -366,59 +383,93 @@ Things worth knowing:
 which is stable across renames, so Refresh pulls the current Riot ID and reports
 `Old#TAG → New#TAG` in the banner.
 
-## Backing up to a remote server
+## Your server
 
-Backups go to a remote Windows machine over **SFTP**, not a Windows file share. The
-server is reached across the internet, and exposing SMB there is how ransomware travels;
-OpenSSH ships with Windows 10 and authenticates with a key file instead of a password.
+One SSH connection, used for one thing: putting the web dashboard on your Windows
+machine. Settings → **Your server**.
 
-### Where the files land
+SSH rather than a Windows file share, because the server is remote — SMB over the open
+internet is a bad idea, while OpenSSH ships with Windows 10 and authenticates with a key
+instead of a password.
 
-An SSH session on Windows starts in the user's profile folder, so the default
-`LeagueVaultBackups` puts them in:
+**On this Mac:** fill in the address, the Windows username and the port (22 unless you
+moved it), then press **Create key**. That writes `~/.ssh/leaguevault_ed25519`. Press
+**Copy public key**.
 
+**On the Windows server**, in PowerShell **as Administrator**:
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 ```
-C:\Users\<your-windows-username>\LeagueVaultBackups\
+
+```powershell
+Start-Service sshd; Set-Service -Name sshd -StartupType Automatic
 ```
 
-**You do not need to create the folder** — the app makes it, one level at a time, so a
-nested path like `Documents/Backups` works too. **Test connection** creates it as well,
-so you can confirm the whole path before enabling uploads.
+```powershell
+New-NetFirewallRule -DisplayName "OpenSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow
+```
 
-Settings spells out the full path under the folder field as you type it. Enter an
-absolute path such as `C:\Backups` or `D:\Vault\League` to put them anywhere else;
-forward slashes are accepted and shown back as Windows separators.
+Then paste the public key in. An **administrator** account on Windows does not read
+`~/.ssh/authorized_keys` — it reads one shared file instead, which catches everybody out:
 
-Each upload is one encrypted `.lvbackup`, plus `LeagueVault-latest.lvbackup` overwritten
-each time. Files land under a temporary `.part` name and are renamed on success, so a
-dropped connection never leaves a half-written backup. Old copies are pruned to the
-number you choose.
+```powershell
+Add-Content C:\ProgramData\ssh\administrators_authorized_keys "PASTE-THE-KEY-HERE"
+```
 
-### Why it is encrypted with a passphrase
+```powershell
+icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+```
 
-Day to day, account passwords are sealed with a key in this Mac's login Keychain. That
-key never leaves the Mac, so a plain copy on a server would be *unopenable* if the Mac
-died — exactly the case you keep backups for. A backup is therefore re-sealed under a key
-derived from a passphrase you choose: PBKDF2-HMAC-SHA256, 210,000 iterations, a fresh
-16-byte salt per file, AES-256-GCM. It restores onto a machine that has never seen this
-one.
+(For a non-administrator account it is `C:\Users\<you>\.ssh\authorized_keys` and no
+`icacls` is needed.)
 
-Only the header is readable without the passphrase — format, timestamp, account count,
-source machine, KDF parameters. Account names, Riot IDs, logins, notes and passwords are
-all inside the sealed payload.
+Forward port 22 on the router if the machine is not on the same network as the Mac.
 
-**Write the passphrase down somewhere that is not this Mac.**
+Back on the Mac, press **Test connection**.
 
-### Restoring
+### Paths on Windows
 
-Settings → **Restore from server…** pulls `LeagueVault-latest.lvbackup`, shows where and
-when it came from, then offers **Merge** (add what is missing) or **Replace** (take the
-backup wholesale). Passwords are re-encrypted under this Mac's Keychain key on the way in.
+Windows' SFTP subsystem exposes drives beneath a single root, so `C:\LeagueVaultWeb`
+travels as `/C:/LeagueVaultWeb`. League Vault adds that leading slash for you — type the
+path the ordinary way. A path with no drive letter is taken relative to the folder an SSH
+session starts in, which is `C:\Users\<you>`.
+
+## Refreshing by itself
+
+Settings → **Refresh by itself**, on by default.
+
+League Vault watches for the League client and refreshes the matching entry the moment
+somebody signs in — rank, LP, last game, champions, wallet, penalties, profile icon.
+Switching accounts inside the client refreshes the new one too, and closing and reopening
+the client refreshes again even for the same account.
+
+If the web dashboard is set to republish on change, the page is pushed out immediately
+after, rather than waiting for the usual delay: signing in and seeing the page update is
+one motion.
+
+### How it finds the entry
+
+By PUUID first, then by Riot ID. Failing both, an entry you added with only a username
+and password has no identity yet and is waiting to adopt one — so it does, **but only
+when it is the only such entry**. With two of them waiting League Vault will not guess
+which is which; it says so and leaves them alone until you refresh one by hand.
+
+If nothing matches at all you get a note naming the account that signed in, not a silent
+no-op.
+
+### What it costs
+
+There is nothing to subscribe to — the client publishes its port and token on its own
+command line and nothing else — so this polls. Every 15 seconds while no client is
+running, every 5 while one is up but nobody has signed in, every 20 once the current
+sign-in has been dealt with. Each poll is one `ps`, and reading the account is a handful
+of requests to `127.0.0.1`.
 
 ## Publishing a web dashboard
 
 Settings → **Publish a web dashboard** turns the vault into a single browsable web page
-and drops it on the same Windows server the backups go to. It is a shop-style catalogue
+and drops it on your Windows server. It is a shop-style catalogue
 of your own accounts: splash-art cards, rank crests, champion pools, wallets, penalties,
 and a filter bar over the top.
 
@@ -430,19 +481,20 @@ one file.
 
 Grid view gives each account a card fronted by the splash art of whatever it last played
 (or a stable pick from its pool when it has never been refreshed), with the folder,
-level, both ranks, champion count, blue essence, RP, server, FA/NFA, three-month
-activity, and a red banner across the top of the card for anything blocking play — a
-queue delay, a dodge timer, a suspension.
+level, both ranks, champion count, blue essence, RP, server, FA/NFA, how long it has sat
+idle, and a red banner across the top of the card for anything blocking play — a queue
+delay, a dodge timer, a suspension.
 
 List view is the same accounts as a dense table, sortable by rank, level, champions,
-essence, RP or last game.
+essence, RP or days idle.
 
 Clicking either opens the full account: solo and flex with win rates and peak, the
 wallet, the last game, every penalty with its countdown, the whole champion pool with
 portraits, your notes, and buttons for u.gg and copying the Riot ID.
 
-The filter bar covers folder, server, rank, FA/NFA, penalty status, activity and
-champion, plus a search box that matches names, logins, folders, notes and champions —
+The filter bar covers folder, server, rank, FA/NFA, penalty status, idle time, who
+played last and champion, plus a search box that matches names, logins, folders, notes
+and champions —
 typing `viktor` leaves only the accounts that own him. `/` focuses the search.
 
 Art comes straight from Riot's CDNs to whoever is looking at the page, so your server
@@ -461,7 +513,7 @@ On by default, and worth leaving on: the page is going somewhere anyone can reac
 
 With it on, what actually sits on the server is ciphertext — AES-256-GCM under a key
 derived from your page passphrase with PBKDF2-HMAC-SHA256, 210,000 iterations, exactly
-the way a backup is sealed. The browser asks for the passphrase and decrypts it locally
+the way an encrypted archive is. The browser asks for the passphrase and decrypts it locally
 with WebCrypto. Someone who finds the address gets a lock screen and a blob.
 
 With it off, everyone who reaches the address can read every account name, rank, server
@@ -472,9 +524,7 @@ automatic publish can run without asking.
 
 ### Setting up the Windows side
 
-You need the SSH part working first — see **Backing up to a remote server** above. The
-dashboard reuses that same address, username and key, so there is nothing more to set up
-on the Mac.
+You need the SSH part working first — see **Your server** above.
 
 **If you already run a web server on that machine,** you are done: point League Vault's
 *Folder the web server serves* at that server's web root (`C:/inetpub/wwwroot/vault`, or
@@ -524,9 +574,9 @@ involved — worth doing first to see what you are about to publish.
 
 ### Keeping it current
 
-**Republish whenever the vault changes** publishes 30 seconds after any change, the same
-debounce the backups use, so a burst of edits is one publish rather than twenty. Leave it
-off to publish only when you press the button.
+**Republish whenever the vault changes** publishes 30 seconds after any change, so a
+burst of edits is one publish rather than twenty. An automatic refresh skips that wait and
+publishes at once. Leave the setting off to publish only when you press the button.
 
 Publishing writes `index.html.part`, deletes the old `index.html`, then renames — so a
 dropped connection never leaves a half-written page being served.

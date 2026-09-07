@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import CommonCrypto
 
 // A published dashboard is one static file. The page is generated here, the vault is
 // baked into it as JSON, and the whole thing is dropped into a folder on the Windows
@@ -50,9 +51,12 @@ struct SiteGame: Codable {
     var kda: String
     var duration: String
     var playedAt: Date
+    /// "ME", "SOMEONE_ELSE", or absent when it was never said.
+    var player: String?
 
     init(_ g: LastGame, championId: Int?) {
         self.championId = championId
+        player = g.player == .unknown ? nil : g.player.rawValue
         champion = g.champion
         queue = g.queue
         result = g.result.rawValue
@@ -110,8 +114,8 @@ struct SiteAccount: Codable {
     var lastGame: SiteGame?
     var penalties: [SitePenalty]
     var champions: [SiteChampion]
-    var recentGames: Int?
-    var recentGamesAsOf: Date?
+    /// Whole days since the last recorded game; absent when no game is on record.
+    var idleDays: Int?
     var lastRefreshed: Date?
     var ugg: String?
 
@@ -139,8 +143,7 @@ struct SiteAccount: Codable {
             .sorted { $0.kind.severityRank < $1.kind.severityRank }
             .map(SitePenalty.init)
         champions = a.ownedChampions.sorted().map { SiteChampion(id: $0.id, name: $0.name) }
-        recentGames = a.recentGames
-        recentGamesAsOf = a.recentGamesAsOf
+        idleDays = a.daysSinceLastGame
         lastRefreshed = a.lastRefreshed
         ugg = a.uggURL?.absoluteString
     }
@@ -213,8 +216,33 @@ enum SiteBuilder {
             .replacingOccurrences(of: "&", with: "\\u0026")
     }
 
-    /// Seals the payload the same way a backup is sealed, so the browser's WebCrypto
-    /// side can be a direct translation of BackupService.
+    /// OWASP's current floor for PBKDF2-HMAC-SHA256. Browsers do this in a few hundred
+    /// milliseconds; it costs an attacker with the file a great deal more.
+    static let iterations = 210_000
+
+    /// Derives the page key. Deliberately plain PBKDF2 + AES-GCM, because the other
+    /// side of it is WebCrypto in a browser and has to be a direct translation.
+    static func deriveKey(passphrase: String, salt: Data, iterations: Int) throws -> SymmetricKey {
+        var derived = Data(count: 32)
+        let length = derived.count
+        let status = derived.withUnsafeMutableBytes { out -> Int32 in
+            salt.withUnsafeBytes { saltBytes -> Int32 in
+                CCKeyDerivationPBKDF(
+                    CCPBKDFAlgorithm(kCCPBKDF2),
+                    passphrase, passphrase.utf8.count,
+                    saltBytes.bindMemory(to: UInt8.self).baseAddress, salt.count,
+                    CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                    UInt32(iterations),
+                    out.bindMemory(to: UInt8.self).baseAddress, length)
+            }
+        }
+        guard status == kCCSuccess else {
+            throw SiteError(message: "Could not derive a key from that passphrase (error \(status)).")
+        }
+        return SymmetricKey(data: derived)
+    }
+
+    /// Seals the payload so that what sits on the server is ciphertext.
     static func lock(_ payload: SitePayload, passphrase: String) throws -> LockedPayload {
         guard !passphrase.isEmpty else {
             throw SiteError(message: "Set a page passphrase, or turn the lock off.")
@@ -222,13 +250,12 @@ enum SiteBuilder {
         var salt = Data(count: 16)
         _ = salt.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
 
-        let key = try BackupService.deriveKey(passphrase: passphrase, salt: salt,
-                                              iterations: BackupService.iterations)
+        let key = try deriveKey(passphrase: passphrase, salt: salt, iterations: iterations)
         let plaintext = try encoder.encode(payload)
         guard let sealed = try AES.GCM.seal(plaintext, using: key).combined else {
             throw SiteError(message: "The page payload could not be encrypted.")
         }
-        return LockedPayload(iterations: BackupService.iterations,
+        return LockedPayload(iterations: iterations,
                              salt: salt.base64EncodedString(),
                              payload: sealed.base64EncodedString())
     }
@@ -285,7 +312,7 @@ final class WebDashboard: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private weak var store: AccountStore?
-    private weak var remote: RemoteBackup?
+    private weak var remote: RemoteServer?
     private var debounce: Task<Void, Never>?
 
     init() {
@@ -332,7 +359,7 @@ final class WebDashboard: ObservableObject {
 
     // MARK: Wiring
 
-    func attach(to store: AccountStore, remote: RemoteBackup) {
+    func attach(to store: AccountStore, remote: RemoteServer) {
         self.store = store
         self.remote = remote
         NotificationCenter.default.addObserver(forName: .vaultDidChange, object: nil, queue: .main) { [weak self] _ in
@@ -390,9 +417,13 @@ final class WebDashboard: ObservableObject {
         guard !isBusy else { return false }
         guard let remote else { lastError = "The server settings are not loaded."; return false }
         guard remote.hasServerAccess else {
-            lastError = "Set the server up first, under “Back up to your server”."
+            lastError = "Set the server up first, under “Your server”."
             return false
         }
+
+        // A publish happening now makes a scheduled one redundant.
+        debounce?.cancel()
+        debounce = nil
 
         isBusy = true
         defer { isBusy = false }
@@ -408,7 +439,7 @@ final class WebDashboard: ObservableObject {
             let dir = sftpDirectory
             log.append("Publishing \(store?.accounts.count ?? 0) accounts to \(resolvedWindowsPath)…")
 
-            let made = remote.makeRemoteDirectory(path: dir, target: remote.sshTarget)
+            let made = remote.makeRemoteDirectory(path: dir)
             if made.status != 0 {
                 lastError = "Could not create \(resolvedWindowsPath): \(remote.describeFailure(made.output))"
                 log.append(made.output.trimmingCharacters(in: .whitespacesAndNewlines))

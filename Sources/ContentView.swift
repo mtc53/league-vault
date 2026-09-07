@@ -11,13 +11,15 @@ enum SortOrder: String, CaseIterable, Identifiable {
     case name = "Name"
     case rank = "Rank"
     case lastPlayed = "Last played"
-    case activity = "Games (3mo)"
+    case idle = "Days idle"
     case region = "Region"
     var id: String { rawValue }
 }
 
 struct ContentView: View {
     @EnvironmentObject var store: AccountStore
+    @EnvironmentObject var web: WebDashboard
+    @EnvironmentObject var watcher: ClientWatcher
 
     @State private var selection: UUID?
     @State private var search = ""
@@ -87,9 +89,10 @@ struct ContentView: View {
             list.sort { rankWeight($0) > rankWeight($1) }
         case .lastPlayed:
             list.sort { ($0.lastGame?.playedAt ?? .distantPast) > ($1.lastGame?.playedAt ?? .distantPast) }
-        case .activity:
-            // Never-counted accounts sort last rather than pretending to be zero.
-            list.sort { ($0.recentGames ?? -1) > ($1.recentGames ?? -1) }
+        case .idle:
+            // Longest-sitting first. Accounts with no game on record sort last rather
+            // than pretending to have been idle forever.
+            list.sort { ($0.daysSinceLastGame ?? -1) > ($1.daysSinceLastGame ?? -1) }
         }
         return list
     }
@@ -146,6 +149,10 @@ struct ContentView: View {
             detail
         }
         .toolbar { toolbarContent }
+        .onChange(of: watcher.pending) { _, signIn in
+            guard let signIn else { return }
+            Task { await handleClientSignIn(signIn) }
+        }
         .sheet(isPresented: $creatingNew) {
             AccountEditor(account: Account(), isNew: true, knownFolders: allFolders) { saved in
                 store.add(saved)
@@ -595,6 +602,59 @@ struct ContentView: View {
         }
     }
 
+    // MARK: Automatic refresh
+
+    /// Which vault entry the client's current sign-in belongs to.
+    ///
+    /// Identity first, then Riot ID. Failing both, an entry added with only a login has
+    /// no identity yet and is waiting to adopt one — but only when there is exactly one
+    /// such entry, because guessing between two would attach the wrong account.
+    private func autoRefreshTarget(for me: LCUSummoner) -> Account? {
+        if !me.puuid.isEmpty,
+           let match = store.accounts.first(where: { $0.puuid == me.puuid }) {
+            return match
+        }
+        if let match = store.accounts.first(where: {
+            !$0.gameName.isEmpty && $0.riotID.compare(me.riotID, options: .caseInsensitive) == .orderedSame
+        }) {
+            return match
+        }
+        let waiting = store.accounts.filter(\.isUnidentified)
+        return waiting.count == 1 ? waiting[0] : nil
+    }
+
+    /// Runs when the watcher sees somebody sign in to the client.
+    private func handleClientSignIn(_ signIn: ClientWatcher.SignIn) async {
+        defer { watcher.clearPending() }
+        let me = signIn.summoner
+
+        guard let target = autoRefreshTarget(for: me) else {
+            banner = Banner(text: "The client signed in as \(me.riotID), which matches no entry here. Add it, or select an entry and press Refresh to link it.",
+                            isError: false)
+            return
+        }
+        guard !refreshingIDs.contains(target.id) else { return }
+
+        switch await refresh(target) {
+        case .updated(let text):
+            banner = Banner(text: text, isError: false)
+            await publishAfterRefresh()
+        case .skipped(let text):
+            banner = Banner(text: text, isError: false)
+        case .failed(let text):
+            banner = Banner(text: text, isError: true)
+        }
+    }
+
+    /// Pushes the change straight out rather than waiting for the publish debounce, so
+    /// signing in to an account and seeing the page update is one continuous motion.
+    private func publishAfterRefresh() async {
+        guard web.isEnabled, web.isConfigured else { return }
+        if await web.publish(reason: "auto-refresh") == false, let error = web.lastError {
+            banner = Banner(text: error, isError: true)
+        }
+    }
+
     // MARK: Refresh
 
     enum RefreshOutcome {
@@ -622,7 +682,7 @@ struct ContentView: View {
         if let icon = me.profileIconId { current.profileIconId = icon }
         if let region = snapshot.region { current.region = region }
         for entry in snapshot.ranks { current.applyLiveRank(entry) }
-        if let game = snapshot.lastGame { current.lastGame = game }
+        if let game = snapshot.lastGame { current.applyLiveLastGame(game) }
         if !snapshot.champions.isEmpty { current.ownedChampions = snapshot.champions }
         if let be = snapshot.blueEssence { current.blueEssence = be }
         if let rp = snapshot.riotPoints { current.riotPoints = rp }
@@ -757,22 +817,26 @@ struct AccountRow: View {
                                          : account.soloRank.tier.color)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    // Activity over the last three months, so a dormant smurf is obvious
-                    // without opening it. Shown dimmed before it has ever been counted,
-                    // rather than hidden — otherwise the badge looks missing — and never
-                    // as a fabricated zero.
+                    // How long the account has sat untouched. Dimmed when you played
+                    // the last game yourself — then the number says nothing about
+                    // whether anyone else has been on it. Shown as a dashed placeholder
+                    // before any game is on record, rather than as a fabricated zero.
                     Group {
-                        if let label = account.recentGamesLabel {
-                            Text(label)
-                                .foregroundStyle(account.isDormant ? Color.secondary : Color.accentColor)
-                                .background(
-                                    Capsule().fill((account.isDormant ? Color.secondary : Color.accentColor)
-                                        .opacity(0.15))
-                                        .padding(.horizontal, -5)
-                                        .padding(.vertical, -1)
-                                )
+                        if let label = account.idleLabel {
+                            HStack(spacing: 3) {
+                                if account.idleIsSelfInflicted {
+                                    Image(systemName: "person.fill").font(.system(size: 7))
+                                }
+                                Text(label)
+                            }
+                            .foregroundStyle(idleTint(account))
+                            .background(
+                                Capsule().fill(idleTint(account).opacity(0.15))
+                                    .padding(.horizontal, -5)
+                                    .padding(.vertical, -1)
+                            )
                         } else {
-                            Text("? in 3mo")
+                            Text("never played")
                                 .foregroundStyle(.tertiary)
                                 .background(
                                     Capsule().strokeBorder(Color.secondary.opacity(0.35),
@@ -785,10 +849,7 @@ struct AccountRow: View {
                     .font(.system(size: 9, weight: .semibold))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .help(account.recentGames == nil
-                          ? "Games in the last 3 months — refresh this account with the client signed in to count them"
-                          : (account.recentGamesAsOf.map { "Games in the last 3 months, counted \($0.relativeDisplay)" }
-                             ?? "Games in the last 3 months"))
+                    .help(idleHelp(account))
                 }
             }
 
@@ -806,6 +867,30 @@ struct AccountRow: View {
         let parts = source.split(separator: " ").prefix(2)
         let letters = parts.compactMap { $0.first }.map(String.init).joined()
         return letters.isEmpty ? "?" : letters.uppercased()
+    }
+
+    // MARK: Idle badge
+
+    /// Grey when you played it last — the number is then just a note to yourself.
+    /// Orange once it has sat a full three months untouched by anyone, otherwise the
+    /// accent colour.
+    private func idleTint(_ account: Account) -> Color {
+        if account.idleIsSelfInflicted { return .secondary }
+        return account.isDormant ? .orange : .accentColor
+    }
+
+    private func idleHelp(_ account: Account) -> String {
+        guard let described = account.idleDescription else {
+            return "No game on record — refresh this account with the client signed in to it."
+        }
+        switch account.lastGamePlayer {
+        case .me:
+            return described + ", played by you. Set who played it in the account's Last Played Game card."
+        case .someoneElse:
+            return described + ", played by someone else."
+        case .unknown:
+            return described + ". Say who played it in the account's Last Played Game card."
+        }
     }
 }
 
