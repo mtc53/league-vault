@@ -351,6 +351,15 @@ final class CycleRunner: ObservableObject {
             RiotClient.launchLeague(); return
         }
 
+        // The Riot Client sometimes opens on the League Classic page, whose Play launches
+        // the wrong mode. Select the normal League icon in the left sidebar first.
+        if AXControl.clickLeagueSidebarIcon(pid: pid) {
+            note("[\(label)] selected the League tab in the sidebar.")
+            try? await sleep(2)
+        } else {
+            note("[\(label)] League sidebar icon not found by label — assuming it is already selected.")
+        }
+
         for attempt in 0..<8 {
             if LCU.discover() != nil {
                 note("[\(label)] League is starting.")

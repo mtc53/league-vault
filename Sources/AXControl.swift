@@ -198,6 +198,34 @@ enum AXControl {
         return true
     }
 
+    /// Clicks the normal League of Legends icon in the Riot Client's left sidebar, so the
+    /// main panel shows the normal League page and not the Classic (or TFT) one. Matched by
+    /// label, excluding the other modes, and restricted to the far-left strip so the big
+    /// centre logo and the "Launches in League of Legends" caption are not mistaken for it.
+    @discardableResult
+    static func clickLeagueSidebarIcon(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        enableManualAccessibility(app)
+
+        var best: CGRect?
+        var stack = children(app)
+        var visited = 0
+        while let el = stack.popLast(), visited < 8000 {
+            visited += 1
+            let label = title(el).lowercased()
+            if label.contains("league") && label.contains("legends"),
+               !label.contains("classic"), !label.contains("teamfight"),
+               !label.contains("tft"), !label.contains("tactics"),
+               let f = frame(el), f.midX < 140 {          // the left sidebar only
+                if best == nil || f.minX < best!.minX { best = f }
+            }
+            stack.append(contentsOf: children(el))
+        }
+        guard let icon = best else { return false }
+        click(in: icon)
+        return true
+    }
+
     // MARK: Windows
 
     private static func windowFrame(_ win: AXUIElement) -> CGRect? {
