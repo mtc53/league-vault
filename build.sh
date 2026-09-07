@@ -48,6 +48,9 @@ if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
+# The web dashboard template is read at publish time, so it has to ride along.
+cp Resources/dashboard.html "$APP/Contents/Resources/dashboard.html"
+
 # Sign with the local certificate when one exists, so the app keeps the same identity
 # across rebuilds — macOS ties Accessibility permission to the signature, and an ad-hoc
 # signature changes every single build. Create one with tools/make-signing-cert.sh.

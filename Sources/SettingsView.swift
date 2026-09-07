@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @EnvironmentObject var remote: RemoteBackup
+    @EnvironmentObject var web: WebDashboard
 
     @State private var includePasswordsInExport = false
     @State private var passphrase = ""
@@ -15,6 +16,11 @@ struct SettingsView: View {
     @State private var testOK: Bool?
     @State private var restoreMessage: String?
     @State private var restoreIsError = false
+
+    @State private var webPassphrase = ""
+    @State private var showWebPassphrase = false
+    @State private var webMessage: String?
+    @State private var webIsError = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -81,6 +87,10 @@ struct SettingsView: View {
 
                     Divider()
 
+                    webSection
+
+                    Divider()
+
                     FormSection("Cache") {
                         HStack(spacing: 10) {
                             Button("Clear profile icon cache") {
@@ -110,6 +120,141 @@ struct SettingsView: View {
             .padding(.vertical, 14)
         }
         .frame(width: 640)
+    }
+
+    // MARK: Web dashboard
+
+    private var webSection: some View {
+        FormSection("Publish a web dashboard") {
+            Text("Turns the vault into one browsable page — cards, filters, ranks, champion pools — and drops it on the same server as your backups, for whatever web server you already point at that folder.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Republish whenever the vault changes", isOn: $web.isEnabled)
+                .toggleStyle(.checkbox)
+
+            HStack(spacing: 10) {
+                Field("Page title") { TextField("League Vault", text: $web.title) }
+                Field("Address to open") { TextField("http://4098.duckdns.org:8080", text: $web.siteURL) }
+            }
+            Field("Folder the web server serves") {
+                TextField("C:/LeagueVaultWeb", text: $web.remotePath)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "globe")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text("The page is written to \(web.resolvedWindowsPath)\\index.html")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Spacer()
+            }
+            Text("It reuses the server address, username and SSH key from the backup section above, so there is nothing else to set up on this Mac.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider().padding(.vertical, 2)
+
+            Toggle("Lock the page behind a passphrase", isOn: $web.isLocked)
+                .toggleStyle(.checkbox)
+            Text(web.isLocked
+                 ? "What sits on the server is encrypted — the browser asks for the passphrase and decrypts the page locally. Anyone who finds the address sees only a lock screen."
+                 : "⚠︎ The page will be readable by anyone who reaches that address: every account name, rank, server and penalty, in the clear.")
+                .font(.system(size: 11))
+                .foregroundStyle(web.isLocked ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if web.isLocked {
+                Field("Page passphrase") {
+                    HStack(spacing: 6) {
+                        if showWebPassphrase {
+                            TextField("", text: $webPassphrase)
+                        } else {
+                            SecureField("", text: $webPassphrase)
+                        }
+                        Button { showWebPassphrase.toggle() } label: {
+                            Image(systemName: showWebPassphrase ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                HStack(spacing: 10) {
+                    Button("Save passphrase") {
+                        web.passphrase = webPassphrase
+                        webMessage = "Page passphrase saved."
+                        webIsError = false
+                    }
+                    .disabled(webPassphrase.isEmpty)
+                    if web.hasPassphrase {
+                        Label("A passphrase is saved", systemImage: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.green)
+                    }
+                    Spacer()
+                }
+                Toggle("Include login names on the page", isOn: $web.includeLogins)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 12))
+            }
+
+            Text("Passwords are never written into the page, locked or not.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+
+            Divider().padding(.vertical, 2)
+
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        let ok = await web.publish(reason: "manual")
+                        webIsError = !ok
+                        webMessage = ok ? "Published \(store.accounts.count) accounts." : web.lastError
+                    }
+                } label: {
+                    if web.isBusy { ProgressView().controlSize(.small).scaleEffect(0.7) }
+                    else { Text("Publish now") }
+                }
+                .disabled(web.isBusy || !web.isConfigured)
+
+                Button("Preview on this Mac") {
+                    if let file = web.writePreview() {
+                        NSWorkspace.shared.open(file)
+                        webIsError = false
+                        webMessage = nil
+                    } else {
+                        webIsError = true
+                        webMessage = web.lastError
+                    }
+                }
+
+                if let url = URL(string: web.siteURL), !web.siteURL.isEmpty {
+                    Button("Open site") { NSWorkspace.shared.open(url) }
+                }
+                Spacer()
+            }
+
+            if !web.isConfigured {
+                Text(remote.hasServerAccess
+                     ? "Set a page passphrase, or turn the lock off, before publishing."
+                     : "Fill in the server address, username and SSH key above first.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            if let webMessage {
+                Label(webMessage, systemImage: webIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(webIsError ? .red : .green)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let last = web.lastPublish {
+                Text("Last published \(last.relativeDisplay)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { webPassphrase = web.passphrase ?? "" }
     }
 
     // MARK: Remote server

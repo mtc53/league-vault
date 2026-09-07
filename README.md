@@ -415,6 +415,122 @@ Settings → **Restore from server…** pulls `LeagueVault-latest.lvbackup`, sho
 when it came from, then offers **Merge** (add what is missing) or **Replace** (take the
 backup wholesale). Passwords are re-encrypted under this Mac's Keychain key on the way in.
 
+## Publishing a web dashboard
+
+Settings → **Publish a web dashboard** turns the vault into a single browsable web page
+and drops it on the same Windows server the backups go to. It is a shop-style catalogue
+of your own accounts: splash-art cards, rank crests, champion pools, wallets, penalties,
+and a filter bar over the top.
+
+It is one file. `index.html` carries the page and the data together — no database, no
+PHP, nothing running server-side, nothing to keep patched. Republishing overwrites that
+one file.
+
+### What is on it
+
+Grid view gives each account a card fronted by the splash art of whatever it last played
+(or a stable pick from its pool when it has never been refreshed), with the folder,
+level, both ranks, champion count, blue essence, RP, server, FA/NFA, three-month
+activity, and a red banner across the top of the card for anything blocking play — a
+queue delay, a dodge timer, a suspension.
+
+List view is the same accounts as a dense table, sortable by rank, level, champions,
+essence, RP or last game.
+
+Clicking either opens the full account: solo and flex with win rates and peak, the
+wallet, the last game, every penalty with its countdown, the whole champion pool with
+portraits, your notes, and buttons for u.gg and copying the Riot ID.
+
+The filter bar covers folder, server, rank, FA/NFA, penalty status, activity and
+champion, plus a search box that matches names, logins, folders, notes and champions —
+typing `viktor` leaves only the accounts that own him. `/` focuses the search.
+
+Art comes straight from Riot's CDNs to whoever is looking at the page, so your server
+only ever serves the one HTML file.
+
+### Passwords are never on it
+
+Not encrypted, not hashed, not present. The page has no field for them.
+
+Login *names* are only included when the page is locked, and only when you tick
+**Include login names on the page**.
+
+### The lock
+
+On by default, and worth leaving on: the page is going somewhere anyone can reach.
+
+With it on, what actually sits on the server is ciphertext — AES-256-GCM under a key
+derived from your page passphrase with PBKDF2-HMAC-SHA256, 210,000 iterations, exactly
+the way a backup is sealed. The browser asks for the passphrase and decrypts it locally
+with WebCrypto. Someone who finds the address gets a lock screen and a blob.
+
+With it off, everyone who reaches the address can read every account name, rank, server
+and penalty.
+
+The page passphrase is stored in your login Keychain under `web-passphrase`, so an
+automatic publish can run without asking.
+
+### Setting up the Windows side
+
+You need the SSH part working first — see **Backing up to a remote server** above. The
+dashboard reuses that same address, username and key, so there is nothing more to set up
+on the Mac.
+
+**If you already run a web server on that machine,** you are done: point League Vault's
+*Folder the web server serves* at that server's web root (`C:/inetpub/wwwroot/vault`, or
+wherever) and skip the rest.
+
+**If you do not,** the shortest path is Caddy — one .exe, no installer. In PowerShell
+**as Administrator** on the Windows server:
+
+```powershell
+mkdir C:\LeagueVaultWeb
+```
+
+```powershell
+Invoke-WebRequest "https://caddyserver.com/api/download?os=windows&arch=amd64" -OutFile C:\LeagueVaultWeb\caddy.exe
+```
+
+```powershell
+New-NetFirewallRule -DisplayName "League Vault web" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+```
+
+```powershell
+schtasks /create /tn "LeagueVaultWeb" /tr "C:\LeagueVaultWeb\caddy.exe file-server --root C:\LeagueVaultWeb --listen :8080" /sc onstart /ru SYSTEM /rl HIGHEST /f
+```
+
+```powershell
+schtasks /run /tn "LeagueVaultWeb"
+```
+
+That last one starts it now; the task restarts it on every boot. Check it is up with
+`Invoke-WebRequest http://localhost:8080` — a 404 is a fine answer at this point, because
+nothing has been published yet. A refused connection is not.
+
+Then forward port **8080** to that machine on your router, so `4098.duckdns.org:8080`
+reaches it from outside. (Reaching it only over the LAN or through Windows App needs no
+forwarding — use the machine's local address instead.)
+
+Finally, in League Vault → Settings → Publish a web dashboard:
+
+- **Folder the web server serves** — `C:/LeagueVaultWeb`
+- **Address to open** — `http://4098.duckdns.org:8080`
+- Set a page passphrase and press **Save passphrase**
+- Press **Publish now**
+
+**Preview on this Mac** renders the same page to
+`~/Library/Application Support/LeagueVault/web/index.html` and opens it, with no server
+involved — worth doing first to see what you are about to publish.
+
+### Keeping it current
+
+**Republish whenever the vault changes** publishes 30 seconds after any change, the same
+debounce the backups use, so a burst of edits is one publish rather than twenty. Leave it
+off to publish only when you press the button.
+
+Publishing writes `index.html.part`, deletes the old `index.html`, then renames — so a
+dropped connection never leaves a half-written page being served.
+
 ## Where the data is
 
 `~/Library/Application Support/LeagueVault/accounts.json`, mode 600.

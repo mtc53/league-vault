@@ -125,7 +125,7 @@ final class RemoteBackup: ObservableObject {
     // MARK: SSH
 
     /// Runs a command and returns its status and combined output.
-    private func run(_ launchPath: String, _ arguments: [String]) -> (status: Int32, output: String) {
+    func run(_ launchPath: String, _ arguments: [String]) -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
@@ -145,10 +145,9 @@ final class RemoteBackup: ObservableObject {
         return folder.isEmpty ? "." : folder
     }
 
-    /// Builds the folder, one level at a time, so a nested path works too. Each mkdir is
+    /// Builds a folder, one level at a time, so a nested path works too. Each mkdir is
     /// prefixed with "-" so an existing folder is not treated as a failure.
-    private func makeRemoteDirectory(target: String) -> (status: Int32, output: String) {
-        let path = sftpPath
+    func makeRemoteDirectory(path: String, target: String) -> (status: Int32, output: String) {
         guard path != "." else { return (0, "") }
 
         var built: [String] = []
@@ -159,18 +158,32 @@ final class RemoteBackup: ObservableObject {
             if prefix.hasSuffix(":") { continue }        // "C:" alone is not a folder
             built.append("-mkdir \"\(prefix)\"")
         }
-        built.append("bye")
-
-        let script = FileManager.default.temporaryDirectory.appendingPathComponent("lv-sftp-mkdir")
-        guard (try? built.joined(separator: "\n").write(to: script, atomically: true, encoding: .utf8)) != nil
-        else { return (-1, "could not stage the mkdir batch") }
-        defer { try? FileManager.default.removeItem(at: script) }
-
-        return run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target])
+        return runSFTPBatch(built, target: target)
     }
 
+    /// Runs an sftp batch. sftp's "-b -" reads from stdin, which a GUI app does not
+    /// have, so the commands go through a real file every time.
+    func runSFTPBatch(_ lines: [String], target: String? = nil) -> (status: Int32, output: String) {
+        guard !lines.isEmpty else { return (0, "") }
+        let script = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lv-sftp-\(UUID().uuidString)")
+        guard (try? (lines + ["bye"]).joined(separator: "\n")
+                .write(to: script, atomically: true, encoding: .utf8)) != nil
+        else { return (-1, "could not stage the sftp batch") }
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        return run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target ?? sshTarget])
+    }
+
+    /// The user@host every part of the server integration talks to.
+    var sshTarget: String { "\(user)@\(host)" }
+
+    /// True once there is somewhere to send files and a key to send them with. The
+    /// backup passphrase is not part of this — the dashboard does not need one.
+    var hasServerAccess: Bool { !host.isEmpty && !user.isEmpty && hasKey }
+
     /// Shared with both tools; only the port flag differs between them.
-    private var commonOptions: [String] {
+    var commonOptions: [String] {
         ["-i", keyPath,
          "-o", "BatchMode=yes",              // never sit waiting for a password prompt
          "-o", "StrictHostKeyChecking=accept-new",
@@ -178,11 +191,11 @@ final class RemoteBackup: ObservableObject {
     }
 
     /// ssh takes a lowercase -p for the port.
-    private var sshOptions: [String] { ["-p", String(port)] + commonOptions }
+    var sshOptions: [String] { ["-p", String(port)] + commonOptions }
 
     /// sftp takes an uppercase -P; lowercase -p means "preserve timestamps" there, so
     /// passing ssh's flags to sftp makes it reject the whole command line.
-    private var sftpOptions: [String] { ["-P", String(port)] + commonOptions }
+    var sftpOptions: [String] { ["-P", String(port)] + commonOptions }
 
     /// Creates the keypair if it does not exist yet.
     @discardableResult
@@ -213,16 +226,16 @@ final class RemoteBackup: ObservableObject {
         log.append(probe.output.trimmingCharacters(in: .whitespacesAndNewlines))
 
         guard probe.status == 0, probe.output.contains("leaguevault-ok") else {
-            lastError = friendlyError(probe.output)
+            lastError = describeFailure(probe.output)
             return false
         }
         lastError = nil
         log.append("Connected. Creating \(resolvedWindowsPath) if it is not there…")
 
-        let mk = makeRemoteDirectory(target: target)
+        let mk = makeRemoteDirectory(path: sftpPath, target: target)
         // "-mkdir" swallows "already exists"; anything else is worth surfacing.
         if mk.status != 0 {
-            lastError = "Connected, but the folder could not be created: \(friendlyError(mk.output))"
+            lastError = "Connected, but the folder could not be created: \(describeFailure(mk.output))"
             log.append(mk.output.trimmingCharacters(in: .whitespacesAndNewlines))
             return false
         }
@@ -231,7 +244,7 @@ final class RemoteBackup: ObservableObject {
     }
 
     /// Turns ssh's output into something actionable.
-    private func friendlyError(_ output: String) -> String {
+    func describeFailure(_ output: String) -> String {
         let text = output.lowercased()
         if text.contains("usage: sftp") || text.contains("usage: ssh") {
             return "League Vault built a bad command line — this is a bug in the app, not a problem with your server. Please report it."
@@ -287,7 +300,7 @@ final class RemoteBackup: ObservableObject {
 
             // Make sure the folder exists — including every level of a nested path —
             // before writing into it.
-            _ = makeRemoteDirectory(target: target)
+            _ = makeRemoteDirectory(path: sftpPath, target: target)
 
             // Upload under a temporary name and rename on success, so a dropped
             // connection never leaves a half-written backup behind.
@@ -303,7 +316,7 @@ final class RemoteBackup: ObservableObject {
 
             let result = run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target])
             guard result.status == 0 else {
-                lastError = "\(reason.capitalized) upload failed: \(friendlyError(result.output))"
+                lastError = "\(reason.capitalized) upload failed: \(describeFailure(result.output))"
                 return false
             }
 
@@ -364,7 +377,7 @@ final class RemoteBackup: ObservableObject {
 
         let result = run("/usr/bin/sftp", sftpOptions + ["-b", script.path, target])
         guard result.status == 0, let data = try? Data(contentsOf: local) else {
-            throw BackupError(message: friendlyError(result.output))
+            throw BackupError(message: describeFailure(result.output))
         }
         defer { try? FileManager.default.removeItem(at: local) }
         return try BackupService.readBackup(data, passphrase: passphrase)
