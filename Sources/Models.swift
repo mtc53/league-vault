@@ -253,6 +253,7 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
     case rankedRestriction = "Ranked restriction"
     case lowPriorityQueue = "Low priority queue"
     case queueDelay = "Queue delay"
+    case dodgeTimer = "Dodge timer"
     case honorDowngrade = "Honor downgrade"
     case suspension = "Temporary suspension"
     case permanentBan = "Permanent ban"
@@ -274,6 +275,7 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
         case .voiceMuted:        return "mic.slash"
         case .lowPriorityQueue:  return "clock.badge.exclamationmark"
         case .queueDelay:        return "hourglass"
+        case .dodgeTimer:        return "arrow.uturn.backward.circle.fill"
         case .honorDowngrade:    return "arrow.down.heart"
         case .suspension:        return "nosign"
         case .permanentBan:      return "xmark.octagon"
@@ -289,7 +291,7 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
     /// merely working off. These get red treatment instead of amber.
     var isCritical: Bool {
         switch self {
-        case .queueDelay, .lowPriorityQueue, .suspension, .permanentBan: return true
+        case .queueDelay, .dodgeTimer, .lowPriorityQueue, .suspension, .permanentBan: return true
         default: return false
         }
     }
@@ -298,15 +300,16 @@ enum PenaltyKind: String, Codable, CaseIterable, Identifiable {
     var severityRank: Int {
         switch self {
         case .queueDelay:        return 0
+        case .dodgeTimer:        return 1
         case .suspension,
-             .permanentBan:      return 1
-        case .lowPriorityQueue:  return 2
-        case .rankedRestriction: return 3
+             .permanentBan:      return 2
+        case .lowPriorityQueue:  return 3
+        case .rankedRestriction: return 4
         case .chatRestriction,
-             .voiceMuted:        return 4
-        case .honorDowngrade:    return 5
+             .voiceMuted:        return 5
+        case .honorDowngrade:    return 6
         case .honorLock,
-             .other:             return 6
+             .other:             return 7
         }
     }
 }
@@ -359,8 +362,13 @@ struct Penalty: Codable, Hashable, Identifiable {
         if expiresAt <= Date() { return "Expired" }
         let days = Calendar.current.dateComponents([.day], from: Date(), to: expiresAt).day ?? 0
         if days >= 1 { return "Active — \(days) day\(days == 1 ? "" : "s") left" }
-        let hours = Calendar.current.dateComponents([.hour], from: Date(), to: expiresAt).hour ?? 0
-        return "Active — \(max(hours, 1)) hour\(hours == 1 ? "" : "s") left"
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: Date(), to: expiresAt)
+        let hours = parts.hour ?? 0, minutes = parts.minute ?? 0
+        if hours >= 1 {
+            return "Active — \(hours)h \(minutes)m left"
+        }
+        let shown = max(minutes, 1)
+        return "Active — \(shown) minute\(shown == 1 ? "" : "s") left"
     }
 }
 
@@ -603,6 +611,26 @@ struct Account: Codable, Identifiable, Hashable {
 
     var activeQueueDelays: [Penalty] {
         activePenalties.filter { $0.kind == .queueDelay }
+    }
+
+    var activeDodgeTimer: Penalty? {
+        activePenalties.first { $0.kind == .dodgeTimer }
+    }
+
+    /// A dodge timer is a fixed 24-hour wait, recorded by hand — nothing in the client
+    /// reports it, so it is entered when it happens and expires on its own.
+    static func dodgeTimer(hours: Int = 24, note: String = "") -> Penalty {
+        Penalty(source: .manual,
+                kind: .dodgeTimer,
+                detail: note.isEmpty ? "\(hours)-hour dodge timer" : note,
+                startedAt: Date(),
+                expiresAt: Date().addingTimeInterval(Double(hours) * 3600))
+    }
+
+    /// Replaces any running dodge timer rather than stacking a second one.
+    mutating func startDodgeTimer(hours: Int = 24) {
+        penalties.removeAll { $0.kind == .dodgeTimer && $0.isActive }
+        penalties.append(Account.dodgeTimer(hours: hours))
     }
 
     /// Replaces penalties the client reported, leaving hand-entered ones untouched.

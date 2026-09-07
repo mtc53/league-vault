@@ -729,8 +729,10 @@ struct AccountRow: View {
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                     if let worst = account.worstActivePenalty {
-                        Image(systemName: worst.kind == .queueDelay
-                              ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                        Image(systemName: worst.kind == .dodgeTimer
+                              ? "arrow.uturn.backward.circle.fill"
+                              : (worst.kind == .queueDelay
+                                 ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill"))
                             .font(.system(size: worst.kind.isCritical ? 11 : 10,
                                           weight: worst.kind.isCritical ? .bold : .regular))
                             .foregroundStyle(worst.kind.accent)

@@ -419,7 +419,8 @@ struct AccountDetailView: View {
     }
 
     private var penaltiesCard: some View {
-        Card(title: "Penalties", systemImage: "exclamationmark.shield") {
+        Card(title: "Penalties", systemImage: "exclamationmark.shield",
+             accessory: AnyView(dodgeButton)) {
             if account.penalties.isEmpty {
                 Text("No penalties recorded. Refresh imports what the client reports; anything it does not expose you can add by hand in Edit.")
                     .font(.system(size: 12))
@@ -476,6 +477,64 @@ struct AccountDetailView: View {
                 }
             }
         }
+    }
+
+    /// Dodging costs a flat 24-hour wait that nothing in the client reports, so it is
+    /// started by hand the moment it happens.
+    @ViewBuilder
+    private var dodgeButton: some View {
+        if let running = account.activeDodgeTimer {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.uturn.backward.circle.fill")
+                    .foregroundStyle(.red)
+                Text(running.expiresAt.map { countdown(to: $0) } ?? "running")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.red)
+                Button("Clear") {
+                    var updated = account
+                    updated.penalties.removeAll { $0.kind == .dodgeTimer && $0.isActive }
+                    store.update(updated)
+                    onNotify("Dodge timer cleared.", false)
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 10))
+            }
+        } else {
+            Menu {
+                Button("24 hours") { startDodge(hours: 24) }
+                Button("12 hours") { startDodge(hours: 12) }
+                Button("6 hours") { startDodge(hours: 6) }
+                Button("30 minutes") { startDodge(hours: 0, minutes: 30) }
+            } label: {
+                Label("Dodge timer", systemImage: "arrow.uturn.backward.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+    }
+
+    private func startDodge(hours: Int, minutes: Int = 0) {
+        var updated = account
+        if minutes > 0 {
+            updated.penalties.removeAll { $0.kind == .dodgeTimer && $0.isActive }
+            updated.penalties.append(Penalty(
+                source: .manual, kind: .dodgeTimer,
+                detail: "\(minutes)-minute dodge timer",
+                startedAt: Date(),
+                expiresAt: Date().addingTimeInterval(Double(minutes) * 60)))
+        } else {
+            updated.startDodgeTimer(hours: hours)
+        }
+        store.update(updated)
+        onNotify("Dodge timer started — \(minutes > 0 ? "\(minutes) minutes" : "\(hours) hours").", false)
+    }
+
+    /// Live-ish countdown; the view redraws whenever the vault changes.
+    private func countdown(to date: Date) -> String {
+        let remaining = Int(date.timeIntervalSinceNow)
+        guard remaining > 0 else { return "expired" }
+        let h = remaining / 3600, m = (remaining % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m left" : "\(m)m left"
     }
 
     private var credentialsCard: some View {
