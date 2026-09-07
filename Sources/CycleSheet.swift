@@ -105,6 +105,22 @@ struct CycleSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        Button {
+                            runner.selfTest()
+                        } label: {
+                            Label("Typing self-test", systemImage: "keyboard.badge.ellipsis")
+                        }
+                        .disabled(runner.isRunning)
+                        Text("Opens the Riot Client and types a marker, so you can see if keystrokes land before running the whole cycle.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    logView
+                }
+
                 Toggle(isOn: $confirmed) {
                     Text("I understand this signs into each account for real, and may stall on a captcha or 2FA prompt.")
                         .font(.system(size: 12))
@@ -173,6 +189,9 @@ struct CycleSheet: View {
                     withAnimation { proxy.scrollTo(runner.items[i].id, anchor: .center) }
                 }
             }
+            logView
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
         }
     }
 
@@ -198,6 +217,46 @@ struct CycleSheet: View {
         case .skipped: return .secondary
         default:       return .secondary
         }
+    }
+
+    // MARK: Log
+
+    @ViewBuilder
+    private var logView: some View {
+        if !runner.log.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("Log").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                    Spacer()
+                    Button("Copy") { copyLog() }.controlSize(.mini)
+                }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(runner.log.enumerated()), id: \.offset) { i, line in
+                                Text(line)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(i)
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .frame(height: 120)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.black.opacity(0.20)))
+                    .onChange(of: runner.log.count) { _, c in
+                        withAnimation { proxy.scrollTo(c - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func copyLog() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(runner.log.joined(separator: "\n"), forType: .string)
     }
 
     // MARK: Footer

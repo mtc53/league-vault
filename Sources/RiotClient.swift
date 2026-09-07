@@ -136,9 +136,7 @@ enum RiotClient {
     @discardableResult
     static func ensureRunning(timeout: TimeInterval = 40) async -> RCUCredentials? {
         if let creds = discover() { return creds }
-
-        // RiotClientServices with no product opens the launcher to the login screen.
-        launch([])
+        openLauncher()
 
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -146,6 +144,21 @@ enum RiotClient {
             if let creds = discover() { return creds }
         }
         return discover()
+    }
+
+    /// Opens the Riot Client to its login screen. Opening the app bundle is what actually
+    /// shows the window — running RiotClientServices bare does not always.
+    static func openLauncher() {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: appPath),
+                                           configuration: config) { _, _ in }
+    }
+
+    /// Whether the Riot Client app bundle is where we expect it.
+    static var isInstalled: Bool {
+        FileManager.default.fileExists(atPath: servicesBinary)
+            || FileManager.default.fileExists(atPath: appPath)
     }
 
     /// Starts League for the signed-in account. Uses RiotClientServices' documented launch

@@ -92,6 +92,34 @@ final class CycleRunner: ObservableObject {
         }
     }
 
+    /// Isolates the keystroke path from the rest of the cycle: hides League Vault, brings
+    /// the Riot Client forward, and types a marker so you can see whether anything lands.
+    func selfTest() {
+        guard !isRunning else { return }
+        log = []
+        note("Self-test starting.")
+        note("Accessibility permission: \(Autofill.isPermitted ? "granted" : "OFF — this is almost certainly why nothing types")")
+        note("Riot Client running: \(RiotClient.isRunning ? "yes" : "no")")
+        Task { [weak self] in
+            guard let self else { return }
+            if !RiotClient.isRunning {
+                self.note("Opening the Riot Client — put its login window on this desktop.")
+                RiotClient.openLauncher()
+                _ = await RiotClient.ensureRunning(timeout: 30)
+            }
+            self.note("Frontmost before: \(self.frontmostName())")
+            self.hideSelf()
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            let focused = Autofill.focusRiotClient()
+            self.note("focusRiotClient() = \(focused); frontmost now: \(self.frontmostName())")
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            Autofill.type("LeagueVaultTest")
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            self.showSelf()
+            self.note("Done. Did “LeagueVaultTest” appear in the Riot Client's username box?")
+        }
+    }
+
     func stop() {
         task?.cancel()
         task = nil
@@ -115,6 +143,8 @@ final class CycleRunner: ObservableObject {
 
     private func run(queue: [Account], iconId: Int, setIcon: Bool, clearChallenges: Bool) async {
         note("Starting a cycle of \(queue.count) account\(queue.count == 1 ? "" : "s").")
+        note("Accessibility permission: \(Autofill.isPermitted ? "granted" : "OFF — keystrokes will do nothing")")
+        note("Riot Client installed: \(RiotClient.isInstalled ? "yes" : "no — not found in /Applications")")
 
         for (index, account) in queue.enumerated() {
             if Task.isCancelled { break }
@@ -159,13 +189,17 @@ final class CycleRunner: ObservableObject {
         // 1. Sign out whoever is signed in, leaving the Riot Client open at its login
         //    screen. The client is never force-quit.
         set(index, .openingClient, "")
+        note("[\(account.displayName)] opening the Riot Client…")
         guard let rcu = await RiotClient.ensureRunning(timeout: Timeout.clientUp) else {
-            throw StepError(message: "The Riot Client did not start.")
+            note("[\(account.displayName)] Riot Client API never answered (port \(RiotClient.discover().map { String($0.port) } ?? "none")).")
+            throw StepError(message: "The Riot Client did not start, or its API never came up.")
         }
+        note("[\(account.displayName)] Riot Client up on port \(rcu.port).")
         try checkCancel()
 
         set(index, .signingOut, "Signing out the last account")
         let signOut = await RiotClient.signOut(timeout: Timeout.signOut)
+        note("[\(account.displayName)] sign-out: \(describe(signOut))")
         if case .failed(let why) = signOut { throw StepError(message: why) }
         try checkCancel()
         // Let the login screen settle and take focus before typing at it.
@@ -183,6 +217,7 @@ final class CycleRunner: ObservableObject {
         for attempt in 0..<6 {
             if Autofill.focusRiotClient() { focused = true; break }
             if Task.isCancelled { showSelf(); throw CancellationError() }
+            note("[\(account.displayName)] focus attempt \(attempt + 1) failed — frontmost is \(frontmostName()).")
             set(index, .signingIn, "Waiting for the Riot Client window (\(attempt + 1))")
             try await sleep(2.5)
         }
@@ -193,6 +228,7 @@ final class CycleRunner: ObservableObject {
 
         // No published updates between confirming focus and typing — a redraw can pull
         // focus back to us.
+        note("[\(account.displayName)] Riot Client focused (frontmost: \(frontmostName())). Typing \(username.count)-char login.")
         try await sleep(0.5)
         Autofill.signIn(username: username, password: password)
         try await sleep(0.4)
@@ -298,6 +334,18 @@ final class CycleRunner: ObservableObject {
                  ? "\(items[index].name): challenge badges cleared."
                  : "\(items[index].name): challenge reset was partly refused.")
         }
+    }
+
+    private func describe(_ r: RiotClient.SignOutResult) -> String {
+        switch r {
+        case .signedOut:    return "logged out via the client"
+        case .alreadyOut:   return "nobody was signed in"
+        case .failed(let m): return "failed — \(m)"
+        }
+    }
+
+    private func frontmostName() -> String {
+        NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
     }
 
     // MARK: Our own window
