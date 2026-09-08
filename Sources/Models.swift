@@ -445,6 +445,8 @@ enum QuickPrep {
         static let setIcon = "prepSetIcon"
         static let clearChallenges = "prepClearChallenges"
         static let removeFriends = "prepRemoveFriends"
+        static let rename = "prepRename"
+        static let namePool = "prepNamePoolPath"
     }
 
     static var iconId: Int {
@@ -476,6 +478,29 @@ enum QuickPrep {
     static var removesFriends: Bool {
         get { UserDefaults.standard.bool(forKey: Keys.removeFriends) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.removeFriends) }
+    }
+
+    /// Off by default: renaming spends a name and cannot be undone.
+    static var renames: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.rename) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.rename) }
+    }
+
+    /// The .txt of Riot IDs to rename accounts to. Empty until one is chosen.
+    static var namePoolPath: String {
+        get { UserDefaults.standard.string(forKey: Keys.namePool) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.namePool) }
+    }
+
+    static var namePoolURL: URL? {
+        let path = namePoolPath.trimmingCharacters(in: .whitespaces)
+        return path.isEmpty ? nil : URL(fileURLWithPath: path)
+    }
+
+    /// How many names are left to hand out, or nil when there is no usable list.
+    static var namesRemaining: Int? {
+        guard let url = namePoolURL, let names = try? NamePool.load(from: url) else { return nil }
+        return names.count
     }
 }
 

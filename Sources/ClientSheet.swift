@@ -52,11 +52,20 @@ final class ClientModel: ObservableObject {
         let outcome = await LCU.runQuickPrep(credentials: credentials,
                                              setIcon: setIcon, iconId: iconId,
                                              clearChallenges: clearChallenges,
-                                             removeFriends: removeFriends) { text in
+                                             removeFriends: removeFriends,
+                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil) { text in
             self.friendProgress = text
         }
 
         var report: [String] = []
+        if let rename = outcome.rename {
+            if let picked = rename.renamedTo {
+                report.append("Renamed to \(picked.riotID) — name removed from the list.")
+            } else if !rename.refusals.isEmpty {
+                report.append("Rename refused for " + rename.refusals.map { "“\($0.name)”" }.joined(separator: " and ") + " — Riot ID left alone.")
+            }
+            if let problem = rename.poolError { report.append(problem) }
+        }
         if let error = outcome.iconError {
             report.append("Icon failed: \(error)")
         } else if let set = outcome.iconSet {
@@ -136,6 +145,7 @@ struct ClientSheet: View {
     @State private var prepIconId = QuickPrep.iconId
     @State private var prepClearChallenges = QuickPrep.clearsChallenges
     @State private var prepRemoveFriends = QuickPrep.removesFriends
+    @State private var prepRenames = QuickPrep.renames
     @State private var confirmPrep = false
     @State private var prepReport: [String] = []
     @State private var scanning = false
@@ -528,6 +538,7 @@ struct ClientSheet: View {
                          ? "set the profile icon to 6923, or 29 if it is not owned"
                          : "set the profile icon to \(prepIconId)")
         }
+        if prepRenames && QuickPrep.namePoolURL != nil { steps.append("rename it from the name list") }
         if prepClearChallenges { steps.append("clear the challenge badges, title and banner") }
         if prepRemoveFriends { steps.append("remove all \(model.friends.count) friends — permanently") }
         return steps
@@ -564,6 +575,20 @@ struct ClientSheet: View {
 
                     Toggle("Clear challenge badges, title and banner", isOn: $prepClearChallenges)
                         .toggleStyle(.checkbox)
+
+                    Toggle("Rename from the name list", isOn: $prepRenames)
+                        .toggleStyle(.checkbox)
+                        .disabled(QuickPrep.namePoolURL == nil)
+                    if QuickPrep.namePoolURL == nil {
+                        Text("Choose a name list first, in Cycle Accounts.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    } else if prepRenames, let left = QuickPrep.namesRemaining {
+                        Text("\(left) name\(left == 1 ? "" : "s") left; the one used is deleted from the file. Two refusals and the Riot ID is left alone.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     Toggle(model.friends.isEmpty
                            ? "Remove all friends"
@@ -615,6 +640,7 @@ struct ClientSheet: View {
         .onChange(of: prepIconId) { _, v in QuickPrep.iconId = v }
         .onChange(of: prepClearChallenges) { _, v in QuickPrep.clearsChallenges = v }
         .onChange(of: prepRemoveFriends) { _, v in QuickPrep.removesFriends = v }
+        .onChange(of: prepRenames) { _, v in QuickPrep.renames = v }
         .alert("Run quick prep on \(model.summoner?.riotID ?? "this account")?", isPresented: $confirmPrep) {
             Button("Cancel", role: .cancel) { }
             Button(prepRemoveFriends ? "Run — removes friends" : "Run",

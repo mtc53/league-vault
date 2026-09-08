@@ -277,11 +277,19 @@ final class CycleRunner: ObservableObject {
         let summonerName = try await refreshInto(account: account, credentials: credentials)
         setName(index, summonerName)
 
-        // 6. Quick prep — icon and challenge reset, never friends.
-        if setIcon || clearChallenges {
+        // 6. Quick prep — rename, icon and challenge reset, never friends.
+        if setIcon || clearChallenges || QuickPrep.renames {
             set(index, .quickPrep, "")
-            await runQuickPrep(credentials: credentials, iconId: iconId,
-                               setIcon: setIcon, clearChallenges: clearChallenges, index: index)
+            let renamed = await runQuickPrep(credentials: credentials, iconId: iconId,
+                                             setIcon: setIcon, clearChallenges: clearChallenges,
+                                             index: index)
+            // A rename changes the Riot ID the vault just recorded, so read it again.
+            if renamed {
+                set(index, .refreshing, "Re-reading the new Riot ID")
+                try await sleep(2)
+                let newName = try await refreshInto(account: account, credentials: credentials)
+                setName(index, newName)
+            }
         }
 
         // 7. Publish, if the dashboard is set up.
@@ -587,13 +595,29 @@ final class CycleRunner: ObservableObject {
         return current.displayName
     }
 
+    /// Returns whether the account was renamed, so the caller can refresh it again.
+    @discardableResult
     private func runQuickPrep(credentials: LCUCredentials, iconId: Int,
-                              setIcon: Bool, clearChallenges: Bool, index: Int) async {
+                              setIcon: Bool, clearChallenges: Bool, index: Int) async -> Bool {
         let name = items[index].name
         let outcome = await LCU.runQuickPrep(credentials: credentials,
                                              setIcon: setIcon, iconId: iconId,
                                              clearChallenges: clearChallenges,
-                                             removeFriends: false)   // never, by design
+                                             removeFriends: false,   // never, by design
+                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil)
+
+        if let rename = outcome.rename {
+            for refusal in rename.refusals {
+                note("\(name): the client refused “\(refusal.name)” — \(refusal.reason)")
+            }
+            if let picked = rename.renamedTo {
+                note("\(name): renamed to \(picked.riotID); removed it from the name list.")
+            } else if rename.refusals.count >= AutoRename.maxAttempts {
+                note("\(name): two names were refused — leaving the Riot ID alone.")
+            }
+            if let problem = rename.poolError { note("\(name): \(problem)") }
+        }
+
         if let error = outcome.iconError {
             note("\(name): icon failed — \(error)")
         } else if let set = outcome.iconSet {
@@ -604,6 +628,7 @@ final class CycleRunner: ObservableObject {
                  ? "\(name): challenge badges cleared."
                  : "\(name): challenge reset was partly refused.")
         }
+        return outcome.rename?.didRename ?? false
     }
 
     private func describe(_ r: RiotClient.SignOutResult) -> String {

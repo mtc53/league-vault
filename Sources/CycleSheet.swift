@@ -10,6 +10,8 @@ struct CycleSheet: View {
     @State private var setIcon = QuickPrep.setsIcon
     @State private var iconId = QuickPrep.iconId
     @State private var clearChallenges = QuickPrep.clearsChallenges
+    @State private var renames = QuickPrep.renames
+    @State private var namePoolPath = QuickPrep.namePoolPath
     @State private var confirmed = false
 
     private var eligible: Int { runner.eligibleCount }
@@ -71,7 +73,7 @@ struct CycleSheet: View {
                     step(1, "Sign out whatever is signed in", "Through the Riot Client's own logout — it is left open, never force-quit.")
                     step(2, "Type the login and submit", "Synthetic keystrokes into the Riot Client, then Return.")
                     step(3, "Launch League and refresh", "Rank, last game, champions, wallet, penalties.")
-                    step(4, "Quick prep", "Icon and challenge reset — never friends.")
+                    step(4, "Quick prep", "Rename, icon and challenge reset — never friends.")
                     step(5, "Publish and go to the next", "If the web dashboard is on.")
                 }
                 .padding(12)
@@ -91,6 +93,11 @@ struct CycleSheet: View {
                     }
                     Toggle("Clear challenge badges, title and banner", isOn: $clearChallenges)
                         .toggleStyle(.checkbox)
+
+                    Toggle("Rename each account from a name list", isOn: $renames)
+                        .toggleStyle(.checkbox)
+                    if renames { namePoolPicker }
+
                     Label("Friends are never removed by the cycle.", systemImage: "person.2")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -129,6 +136,50 @@ struct CycleSheet: View {
             }
             .padding(18)
         }
+    }
+
+    /// Chooses the .txt of Riot IDs and shows how many are left in it.
+    private var namePoolPicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 9) {
+                Button("Choose name list…") { chooseNamePool() }
+                    .controlSize(.small)
+                if namePoolPath.isEmpty {
+                    Text("No list chosen").font(.system(size: 11)).foregroundStyle(.secondary)
+                } else {
+                    Text((namePoolPath as NSString).lastPathComponent)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Spacer()
+            }
+            if let left = QuickPrep.namesRemaining {
+                Text("\(left) name\(left == 1 ? "" : "s") left. Each one is used once, then deleted from the file.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(left == 0 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
+            } else if !namePoolPath.isEmpty {
+                Text("That file could not be read.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+            }
+            Text("One Riot ID per line, like “tonka#LAN1”. Lines starting with === are treated as headings. If Riot refuses a name another is tried; after two refusals the account keeps its name.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.leading, 18)
+    }
+
+    private func chooseNamePool() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText, .text]
+        panel.allowsOtherFileTypes = true
+        panel.canChooseDirectories = false
+        panel.message = "Choose a .txt of Riot IDs, one per line."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        namePoolPath = url.path
+        QuickPrep.namePoolPath = url.path
     }
 
     private func step(_ n: Int, _ title: String, _ detail: String) -> some View {
@@ -299,5 +350,7 @@ struct CycleSheet: View {
         QuickPrep.setsIcon = setIcon
         QuickPrep.iconId = iconId
         QuickPrep.clearsChallenges = clearChallenges
+        QuickPrep.renames = renames && !namePoolPath.isEmpty
+        QuickPrep.namePoolPath = namePoolPath
     }
 }

@@ -977,6 +977,7 @@ enum LCU {
         var challenges: ChallengeReset?
         var friendsRemoved: Int?
         var friendsFailed: Int?
+        var rename: AutoRename.Outcome?
     }
 
     /// Sets the profile icon, clears the challenge badges, and optionally removes every
@@ -986,8 +987,16 @@ enum LCU {
                              setIcon: Bool, iconId: Int,
                              clearChallenges: Bool,
                              removeFriends: Bool,
+                             renameFrom poolURL: URL? = nil,
                              stage: ((String) -> Void)? = nil) async -> QuickPrepOutcome {
         var outcome = QuickPrepOutcome()
+
+        // Renaming first: everything after it — and the vault refresh that follows —
+        // should see the new Riot ID rather than the old one.
+        if let poolURL {
+            outcome.rename = await AutoRename.run(credentials: credentials,
+                                                  poolURL: poolURL, stage: stage)
+        }
 
         if setIcon {
             outcome.iconRequested = iconId
