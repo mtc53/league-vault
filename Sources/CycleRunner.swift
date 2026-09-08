@@ -236,11 +236,21 @@ final class CycleRunner: ObservableObject {
             throw StepError(message: "Could not bring the Riot Client forward to type into it. Is its window open on the same desktop as League Vault?")
         }
 
-        // No published updates between confirming focus and typing — a redraw can pull
-        // focus back to us.
         note("[\(account.displayName)] Riot Client focused (frontmost: \(frontmostName())). Locating the login fields…")
-        try await sleep(0.5)
-        await typeLogin(username: username, password: password, label: account.displayName)
+
+        // The login form takes a while to rebuild after a sign-out, and until it exists
+        // there is nothing to type into. Wait for it rather than typing blind.
+        set(index, .signingIn, "Waiting for the login form")
+        let fields = await waitForLoginForm(label: account.displayName)
+        guard fields.found else {
+            showSelf()
+            throw StepError(message: "The Riot Client never showed its login form after signing out.")
+        }
+
+        // No published updates between confirming the form and typing — a redraw can pull
+        // focus back to us.
+        await typeLogin(fields: fields, username: username, password: password,
+                        label: account.displayName)
         try await sleep(0.4)
         showSelf()
         set(index, .signingIn, "Typed — waiting for sign-in")
@@ -274,46 +284,61 @@ final class CycleRunner: ObservableObject {
         }
     }
 
+    /// Waits for the Riot Client's login form to actually exist. After a sign-out the
+    /// client rebuilds it, and until then there are no fields to click — typing during that
+    /// window goes nowhere. If it does not appear, the window is reopened and refocused
+    /// once before giving up.
+    private func waitForLoginForm(label: String) async -> AXControl.LoginFields {
+        guard let pid = AXControl.riotPID() else { return AXControl.LoginFields() }
+
+        var fields = await AXControl.loginFieldsWaiting(pid: pid, attempts: 8)
+        if fields.found { return fields }
+
+        note("[\(label)] no login form yet — reopening the Riot Client window.")
+        RiotClient.openLauncher()
+        try? await sleep(3)
+        _ = Autofill.focusRiotClient()
+        try? await sleep(1)
+
+        fields = await AXControl.loginFieldsWaiting(pid: pid, attempts: 8)
+        if !fields.found {
+            note("[\(label)] the login form never appeared.")
+        }
+        return fields
+    }
+
     /// Puts the caret in the username field by clicking it — focusing the window is not
     /// enough for an Electron form — then types, clicks the password field (or Tabs to it
     /// if it could not be located), types that, and submits.
-    private func typeLogin(username: String, password: String, label: String) async {
-        guard let pid = AXControl.riotPID() else {
-            note("[\(label)] could not find the Riot Client process for the click. Typing blind.")
+    private func typeLogin(fields: AXControl.LoginFields,
+                           username: String, password: String, label: String) async {
+        guard let user = fields.username else {
+            note("[\(label)] no username field to click — Tabbing and typing blind.")
+            Autofill.pressTab()
             Autofill.signIn(username: username, password: password)
             return
         }
-        let fields = await AXControl.loginFieldsWaiting(pid: pid)
 
-        if let user = fields.username {
-            note("[\(label)] clicking the username field.")
-            AXControl.click(in: user)
+        note("[\(label)] clicking the username field.")
+        AXControl.click(in: user)
+        usleep(200_000)
+        Autofill.clearField()
+        Autofill.type(username)
+
+        if let pass = fields.password {
+            AXControl.click(in: pass)
             usleep(200_000)
             Autofill.clearField()
-            Autofill.type(username)
-
-            if let pass = fields.password {
-                AXControl.click(in: pass)
-                usleep(200_000)
-                Autofill.clearField()
-                Autofill.type(password)
-            } else {
-                note("[\(label)] no password field found — Tabbing from the username field.")
-                Autofill.pressTab()
-                Autofill.type(password)
-            }
-            usleep(150_000)
-            Autofill.pressReturn()
+            Autofill.type(password)
         } else {
-            note("[\(label)] the login fields were not exposed by the client — typing blind after a Tab.")
+            note("[\(label)] no password field found — Tabbing from the username field.")
             Autofill.pressTab()
-            Autofill.signIn(username: username, password: password)
+            Autofill.type(password)
         }
+        usleep(150_000)
+        Autofill.pressReturn()
     }
 
-    /// Signs whoever is signed in out, without ever quitting the Riot Client. If League is
-    /// up it is done through the League client (which returns to the Riot Client login);
-    /// otherwise through the Riot Client's own logout.
     /// Ends the current session: closes the League client (never the Riot Client), then
     /// signs the account out at the Riot Client level, leaving it open at its login screen.
     private func signOutCurrent(label: String) async throws {

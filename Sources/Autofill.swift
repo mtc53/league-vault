@@ -116,6 +116,10 @@ enum Autofill {
             guard let app = riotLauncher() else { return false }
             app.unhide()
             app.activate(options: [.activateAllWindows])
+            // Activating the app is not the same as raising its windows: after a sign-out
+            // the client can be frontmost with its login window still hidden behind
+            // everything. Ask for the raise explicitly.
+            AXControl.raiseWindows(pid: app.processIdentifier)
             usleep(450_000)
             if let front = NSWorkspace.shared.frontmostApplication, isRiotLauncher(front) {
                 return true

@@ -226,6 +226,27 @@ enum AXControl {
         return true
     }
 
+    /// Raises the app's windows and un-minimises them.
+    ///
+    /// Activating an application does not necessarily bring its windows forward — after a
+    /// sign-out the Riot Client can be the frontmost app with its login window still
+    /// behind everything or not yet shown. Raising has to be asked for explicitly.
+    /// Returns whether the app had any window to raise.
+    @discardableResult
+    static func raiseWindows(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        enableManualAccessibility(app)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+
+        guard let windows = attr(app, kAXWindowsAttribute as String) as? [AXUIElement],
+              !windows.isEmpty else { return false }
+        for window in windows {
+            AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        }
+        return true
+    }
+
     // MARK: Windows
 
     private static func windowFrame(_ win: AXUIElement) -> CGRect? {
