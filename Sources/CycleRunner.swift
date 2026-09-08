@@ -604,16 +604,22 @@ final class CycleRunner: ObservableObject {
                                              setIcon: setIcon, iconId: iconId,
                                              clearChallenges: clearChallenges,
                                              removeFriends: false,   // never, by design
-                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil)
+                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil) { [weak self] text in
+            // Live, because a rename now takes several seconds per attempt. The callback
+            // arrives off the main actor, so hop before touching the published log.
+            Task { @MainActor in self?.note("\(name): \(text)") }
+        }
 
         if let rename = outcome.rename {
-            for refusal in rename.refusals {
-                note("\(name): the client refused “\(refusal.name)” — \(refusal.reason)")
+            for attempt in rename.attempts {
+                note(attempt.succeeded
+                     ? "\(name): renamed to \(attempt.name) — confirmed."
+                     : "\(name): “\(attempt.name)” did not take — \(attempt.reason ?? "no reason given").")
             }
             if let picked = rename.renamedTo {
-                note("\(name): renamed to \(picked.riotID); removed it from the name list.")
-            } else if rename.refusals.count >= AutoRename.maxAttempts {
-                note("\(name): two names were refused — leaving the Riot ID alone.")
+                note("\(name): removed \(picked.riotID) from the name list.")
+            } else if rename.attempts.count >= AutoRename.maxAttempts {
+                note("\(name): \(AutoRename.maxAttempts) names did not take — leaving the Riot ID alone.")
             }
             if let problem = rename.poolError { note("\(name): \(problem)") }
         }

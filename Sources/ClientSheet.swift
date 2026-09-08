@@ -60,9 +60,11 @@ final class ClientModel: ObservableObject {
         var report: [String] = []
         if let rename = outcome.rename {
             if let picked = rename.renamedTo {
-                report.append("Renamed to \(picked.riotID) — name removed from the list.")
-            } else if !rename.refusals.isEmpty {
-                report.append("Rename refused for " + rename.refusals.map { "“\($0.name)”" }.joined(separator: " and ") + " — Riot ID left alone.")
+                report.append("Renamed to \(picked.riotID), confirmed — name removed from the list.")
+            } else if !rename.attempts.isEmpty {
+                report.append("Rename did not take for "
+                    + rename.attempts.map { "“\($0.name)”" }.joined(separator: " and ")
+                    + " — Riot ID left alone.")
             }
             if let problem = rename.poolError { report.append(problem) }
         }
