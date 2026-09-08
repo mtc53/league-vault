@@ -431,14 +431,19 @@ struct OwnedChampion: Codable, Hashable, Identifiable, Comparable {
 enum QuickPrep {
     /// The dark-elf icon with the red tear streaks, found by matching the catalogue.
     static let preferredIconId = 6923
-    /// Every account owns this one, so it is what an unowned preference falls back to.
+    /// Second choice, when the account does not own 6923.
+    static let secondIconId = 1151
+    /// Every account owns this one, so it is where the chain always ends.
     /// Riot resets an unowned icon server-side, which makes the fallback worth having.
     static let fallbackIconId = 29
 
     static let defaultIconId = preferredIconId
 
-    /// The only two icons quick prep will set.
-    static var choices: [Int] { [preferredIconId, fallbackIconId] }
+    /// Tried in this order: the LeBlanc icon, then 1151, then the one every account owns.
+    static let iconChain = [preferredIconId, secondIconId, fallbackIconId]
+
+    /// The only icons quick prep will set.
+    static var choices: [Int] { iconChain }
 
     private enum Keys {
         static let icon = "prepIconId"
@@ -452,18 +457,23 @@ enum QuickPrep {
     static var iconId: Int {
         get {
             let stored = UserDefaults.standard.object(forKey: Keys.icon) as? Int ?? preferredIconId
-            // Anything else that was saved earlier collapses back to the two choices.
+            // Anything else that was saved earlier collapses back to the offered choices.
             return choices.contains(stored) ? stored : preferredIconId
         }
         set { UserDefaults.standard.set(newValue, forKey: Keys.icon) }
     }
 
-    /// Which icon to actually set, given what the account owns.
+    /// Which icon to actually set, given what the account owns: the one asked for, then
+    /// the rest of the chain in order, ending at the icon every account has.
     static func resolvedIcon(preferring wanted: Int, ownedIcons: Set<Int>) -> (id: Int, fellBack: Bool) {
         // An empty set means the inventory could not be read — do not second-guess it.
         guard !ownedIcons.isEmpty else { return (wanted, false) }
-        if ownedIcons.contains(wanted) { return (wanted, false) }
-        // Falling back to the same id is not a fallback worth reporting.
+
+        for id in [wanted] + iconChain.filter({ $0 != wanted }) where ownedIcons.contains(id) {
+            // Landing on the one asked for is not a fallback worth reporting.
+            return (id, id != wanted)
+        }
+        // Nothing in the chain is owned, which should not happen — 29 comes with the account.
         return (fallbackIconId, fallbackIconId != wanted)
     }
     static var setsIcon: Bool {

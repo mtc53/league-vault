@@ -537,8 +537,8 @@ struct ClientSheet: View {
         var steps: [String] = []
         if prepSetIcon {
             steps.append(prepIconId == QuickPrep.preferredIconId
-                         ? "set the profile icon to 6923, or 29 if it is not owned"
-                         : "set the profile icon to \(prepIconId)")
+                         ? "set the profile icon to 6923, falling back to 1151 then 29"
+                         : "set the profile icon to \(prepIconId), falling back through the rest of the chain")
         }
         if prepRenames && QuickPrep.namePoolURL != nil { steps.append("rename it from the name list") }
         if prepClearChallenges { steps.append("clear the challenge badges, title and banner") }
@@ -562,6 +562,7 @@ struct ClientSheet: View {
                             .toggleStyle(.checkbox)
                         Picker("", selection: $prepIconId) {
                             Text("6923 — preferred").tag(QuickPrep.preferredIconId)
+                            Text("1151 — second choice").tag(QuickPrep.secondIconId)
                             Text("29 — always owned").tag(QuickPrep.fallbackIconId)
                         }
                         .labelsHidden()
@@ -569,7 +570,7 @@ struct ClientSheet: View {
                         .disabled(!prepSetIcon)
                     }
                     if prepSetIcon && prepIconId == QuickPrep.preferredIconId {
-                        Text("If the account does not own 6923, it sets 29 instead — Riot resets an unowned icon server-side.")
+                        Text("If the account does not own 6923 it tries 1151, then 29 — Riot resets an unowned icon server-side.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)

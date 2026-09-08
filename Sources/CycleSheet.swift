@@ -86,6 +86,7 @@ struct CycleSheet: View {
                     if setIcon {
                         Picker("Icon", selection: $iconId) {
                             Text("6923 — preferred").tag(QuickPrep.preferredIconId)
+                            Text("1151 — second choice").tag(QuickPrep.secondIconId)
                             Text("29 — always owned").tag(QuickPrep.fallbackIconId)
                         }
                         .pickerStyle(.radioGroup)

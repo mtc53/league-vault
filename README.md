@@ -159,19 +159,21 @@ step is a toggle, and the choices are remembered:
 
 | Step | Default | Call |
 |---|---|---|
-| Set the profile icon | on, **6923** with a fallback to **29** | `PUT /lol-summoner/v1/current-summoner/icon` |
+| Set the profile icon | on, **6923** → **1151** → **29** | `PUT /lol-summoner/v1/current-summoner/icon` |
 | Clear challenge badges, title and banner | on | `POST /lol-challenges/v1/update-player-preferences/` ×3 |
 | Remove all friends | **off** | `DELETE /lol-chat/v1/friends/{pid}` per friend |
 
-Quick prep offers exactly two icons:
+Quick prep works down a chain of three icons:
 
 - **6923** — the dark-elf icon with the red tear streaks, the default
-- **29** — owned by every account, the fallback
+- **1151** — second choice, when 6923 is not owned
+- **29** — owned by every account, so the chain always ends somewhere
 
-Before setting 6923 it checks the account's inventory
-(`/lol-inventory/v2/inventory`, with three older shapes as fallbacks). If the account
-does not own it, **29** is set instead and the report says so — Riot resets an unowned
-icon server-side, so setting one that is not owned does not stick.
+Before setting one it checks the account's inventory
+(`/lol-inventory/v2/inventory`, with three older shapes as fallbacks) and picks the first
+in the chain the account actually owns, starting from the one chosen in the picker. The
+report says when it had to fall back — Riot resets an unowned icon server-side, so setting
+one that is not owned does not stick.
 
 If the inventory cannot be read at all, the preference is used as-is rather than being
 second-guessed. To set any other icon, use **Change icon…** next to the Riot ID, which
@@ -318,19 +320,21 @@ step is a toggle, and the choices are remembered:
 
 | Step | Default | Call |
 |---|---|---|
-| Set the profile icon | on, **6923** with a fallback to **29** | `PUT /lol-summoner/v1/current-summoner/icon` |
+| Set the profile icon | on, **6923** → **1151** → **29** | `PUT /lol-summoner/v1/current-summoner/icon` |
 | Clear challenge badges, title and banner | on | `POST /lol-challenges/v1/update-player-preferences/` ×3 |
 | Remove all friends | **off** | `DELETE /lol-chat/v1/friends/{pid}` per friend |
 
-Quick prep offers exactly two icons:
+Quick prep works down a chain of three icons:
 
 - **6923** — the dark-elf icon with the red tear streaks, the default
-- **29** — owned by every account, the fallback
+- **1151** — second choice, when 6923 is not owned
+- **29** — owned by every account, so the chain always ends somewhere
 
-Before setting 6923 it checks the account's inventory
-(`/lol-inventory/v2/inventory`, with three older shapes as fallbacks). If the account
-does not own it, **29** is set instead and the report says so — Riot resets an unowned
-icon server-side, so setting one that is not owned does not stick.
+Before setting one it checks the account's inventory
+(`/lol-inventory/v2/inventory`, with three older shapes as fallbacks) and picks the first
+in the chain the account actually owns, starting from the one chosen in the picker. The
+report says when it had to fall back — Riot resets an unowned icon server-side, so setting
+one that is not owned does not stick.
 
 If the inventory cannot be read at all, the preference is used as-is rather than being
 second-guessed. To set any other icon, use **Change icon…** next to the Riot ID, which
