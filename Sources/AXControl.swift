@@ -188,6 +188,26 @@ enum AXControl {
         return true
     }
 
+    /// Whether any label in the app's window contains one of `phrases`.
+    ///
+    /// The Riot Client reports a refused sign-in on screen rather than through its API, so
+    /// the only way to notice one is to read the window.
+    static func containsAnyText(pid: pid_t, phrases: [String]) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        enableManualAccessibility(app)
+        let needles = phrases.map { $0.lowercased() }
+
+        var stack = children(app)
+        var visited = 0
+        while let el = stack.popLast(), visited < 8000 {
+            visited += 1
+            let label = title(el).lowercased()
+            if !label.isEmpty, needles.contains(where: { label.contains($0) }) { return true }
+            stack.append(contentsOf: children(el))
+        }
+        return false
+    }
+
     // MARK: Windows
 
     /// Raises the app's windows and un-minimises them.

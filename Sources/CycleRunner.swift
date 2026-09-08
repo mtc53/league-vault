@@ -55,12 +55,17 @@ final class CycleRunner: ObservableObject {
         static let leagueUsable: TimeInterval = 15
     }
 
-    /// How many times one account is attempted when its client keeps opening blank.
-    private static let maxAttempts = 3
+    /// How many times League is reopened when its client keeps coming up blank.
+    private static let maxLaunchAttempts = 3
+    /// How many times a login is submitted when the client reports a failed sign-in.
+    private static let maxSignInAttempts = 2
 
-    /// The League client came up but never loaded — relaunching it fixes this, so the
-    /// account is started over rather than failed.
+    /// The League client came up but never loaded. Closing and reopening League fixes it,
+    /// and the account stays signed in, so only the launch is repeated.
     private struct StuckClientError: Error {}
+
+    /// The Riot Client answered the login with an error rather than a session.
+    private struct SignInRejectedError: Error {}
 
     private weak var store: AccountStore?
     private weak var web: WebDashboard?
@@ -177,44 +182,21 @@ final class CycleRunner: ObservableObject {
                 continue
             }
 
-            // A League client that comes up blank never recovers on its own, so that one
-            // account is torn down and run again rather than failed.
-            var attempt = 1
-            var cancelled = false
-            while true {
-                do {
-                    try await cycleOne(index: index, account: account,
-                                       username: account.loginUsername, password: password,
-                                       iconId: iconId, setIcon: setIcon, clearChallenges: clearChallenges)
-                    set(index, .done, "")
-                    break
-                } catch is CancellationError {
-                    cancelled = true
-                    break
-                } catch is StuckClientError {
-                    guard attempt < Self.maxAttempts else {
-                        let message = "The League client kept opening blank (\(Self.maxAttempts) tries)."
-                        set(index, .failed, message)
-                        note("\(account.displayName): \(message)")
-                        try? await signOutCurrent(label: account.displayName)
-                        break
-                    }
-                    note("\(account.displayName): League opened but never loaded — closing it and starting this account over (attempt \(attempt + 1) of \(Self.maxAttempts)).")
-                    set(index, .signingOut, "Restarting this account")
-                    try? await signOutCurrent(label: account.displayName)
-                    attempt += 1
-                } catch let error as StepError {
-                    set(index, .failed, error.message)
-                    note("\(account.displayName): \(error.message)")
-                    // Best effort: sign this account out before the next one. Never quits.
-                    try? await signOutCurrent(label: account.displayName)
-                    break
-                } catch {
-                    set(index, .failed, error.localizedDescription)
-                    break
-                }
+            do {
+                try await cycleOne(index: index, account: account,
+                                   username: account.loginUsername, password: password,
+                                   iconId: iconId, setIcon: setIcon, clearChallenges: clearChallenges)
+                set(index, .done, "")
+            } catch is CancellationError {
+                break
+            } catch let error as StepError {
+                set(index, .failed, error.message)
+                note("\(account.displayName): \(error.message)")
+                // Best effort: sign this account out before the next one. Never quits.
+                try? await signOutCurrent(label: account.displayName)
+            } catch {
+                set(index, .failed, error.localizedDescription)
             }
-            if cancelled { break }
         }
 
         // Tidy up: sign the last account out so nothing is left logged in.
@@ -248,10 +230,74 @@ final class CycleRunner: ObservableObject {
         // Let the login screen settle and take focus before typing at it.
         try await sleep(4)
 
-        // 2. Bring the Riot Client forward and type into it. League Vault must not be
-        //    frontmost when the keystrokes fire, or they land in our own window — its
-        //    modal sheet keeps it key otherwise, which is why nothing was typed. So hide
-        //    League Vault for the brief typing window, then bring it back.
+        // 2–3. Type the login and wait for the session. The client sometimes answers with
+        //      "failed to sign in" for no good reason, so a rejection is tried once more.
+        for attempt in 1...Self.maxSignInAttempts {
+            try await submitLogin(index: index, account: account,
+                                  username: username, password: password)
+            do {
+                set(index, .signingIn, "Waiting for sign-in")
+                try await waitForSignIn(rcu: rcu, label: account.displayName)
+                break
+            } catch is SignInRejectedError {
+                guard attempt < Self.maxSignInAttempts else {
+                    throw StepError(message: "The Riot Client rejected the sign-in — it reported a failed sign-in \(Self.maxSignInAttempts) times.")
+                }
+                note("[\(account.displayName)] the client reported a failed sign-in — trying once more.")
+                try await sleep(4)
+            }
+        }
+
+        // 4. Click Play to launch League. A client that comes up blank never recovers, so
+        //    close just League and open it again — the account stays signed in, so only
+        //    this part repeats.
+        var credentials: LCUCredentials?
+        for attempt in 1...Self.maxLaunchAttempts {
+            set(index, .launchingLeague, attempt == 1 ? "Clicking Play" : "Reopening League (\(attempt))")
+            await launchLeague(label: account.displayName)
+            set(index, .waitingForClient, "")
+            do {
+                credentials = try await waitForLeague(label: account.displayName)
+                break
+            } catch is StuckClientError {
+                guard attempt < Self.maxLaunchAttempts else {
+                    throw StepError(message: "The League client kept opening blank (\(Self.maxLaunchAttempts) tries).")
+                }
+                note("[\(account.displayName)] League opened but never loaded — closing it and opening it again.")
+                await closeLeague(label: account.displayName)
+                try await sleep(3)
+            }
+        }
+        guard let credentials else {
+            throw StepError(message: "The League client never became usable.")
+        }
+
+        // 5. Refresh — link the signed-in summoner to this queue entry.
+        set(index, .refreshing, "")
+        let summonerName = try await refreshInto(account: account, credentials: credentials)
+        setName(index, summonerName)
+
+        // 6. Quick prep — icon and challenge reset, never friends.
+        if setIcon || clearChallenges {
+            set(index, .quickPrep, "")
+            await runQuickPrep(credentials: credentials, iconId: iconId,
+                               setIcon: setIcon, clearChallenges: clearChallenges, index: index)
+        }
+
+        // 7. Publish, if the dashboard is set up.
+        if let web, web.isEnabled, web.isConfigured {
+            set(index, .publishing, "")
+            _ = await web.publish(reason: "account cycle")
+        }
+    }
+
+    /// Brings the Riot Client forward, waits for its login form and types into it.
+    ///
+    /// League Vault must not be frontmost when the keystrokes fire, or they land in our own
+    /// window — its modal sheet keeps it key otherwise. So League Vault hides for the brief
+    /// typing window, then comes back.
+    private func submitLogin(index: Int, account: Account,
+                             username: String, password: String) async throws {
         set(index, .signingIn, "Focusing the Riot Client")
         hideSelf()
         try await sleep(0.6)
@@ -287,34 +333,21 @@ final class CycleRunner: ObservableObject {
         try await sleep(0.4)
         showSelf()
         set(index, .signingIn, "Typed — waiting for sign-in")
+    }
 
-        // 3. Wait for the RSO session to appear.
-        set(index, .signingIn, "Waiting for sign-in")
-        try await waitForSignIn(rcu: rcu)
-
-        // 4. Click Play in the Riot Client to launch League, then wait for its client.
-        set(index, .launchingLeague, "Clicking Play")
-        await launchLeague(label: account.displayName)
-        set(index, .waitingForClient, "")
-        let credentials = try await waitForLeague(label: account.displayName)
-
-        // 5. Refresh — link the signed-in summoner to this queue entry.
-        set(index, .refreshing, "")
-        let summonerName = try await refreshInto(account: account, credentials: credentials)
-        setName(index, summonerName)
-
-        // 6. Quick prep — icon and challenge reset, never friends.
-        if setIcon || clearChallenges {
-            set(index, .quickPrep, "")
-            await runQuickPrep(credentials: credentials, iconId: iconId,
-                               setIcon: setIcon, clearChallenges: clearChallenges, index: index)
+    /// Closes the League client without touching the session, so the account stays signed
+    /// in at the Riot Client and League can simply be opened again.
+    private func closeLeague(label: String) async {
+        guard let lcu = LCU.discover() else { return }
+        note("[\(label)] closing the League client…")
+        _ = await LCU.quitClient(credentials: lcu)
+        var gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
+        if !gone {
+            note("[\(label)] League did not close on request — forcing it.")
+            RiotClient.killLeague()
+            gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
         }
-
-        // 7. Publish, if the dashboard is set up.
-        if let web, web.isEnabled, web.isConfigured {
-            set(index, .publishing, "")
-            _ = await web.publish(reason: "account cycle")
-        }
+        note(gone ? "[\(label)] League closed." : "[\(label)] League still running after a forced close.")
     }
 
     /// Waits for the Riot Client's login form to actually exist. After a sign-out the
@@ -375,16 +408,8 @@ final class CycleRunner: ObservableObject {
     /// Ends the current session: closes the League client (never the Riot Client), then
     /// signs the account out at the Riot Client level, leaving it open at its login screen.
     private func signOutCurrent(label: String) async throws {
-        if let lcu = LCU.discover() {
-            note("[\(label)] closing the League client…")
-            _ = await LCU.quitClient(credentials: lcu)
-            var gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
-            if !gone {
-                note("[\(label)] League did not close on request — forcing it.")
-                RiotClient.killLeague()
-                gone = await waitUntil(timeout: Timeout.signOut) { LCU.discover() == nil }
-            }
-            note(gone ? "[\(label)] League closed." : "[\(label)] League still running after a forced close.")
+        if LCU.discover() != nil {
+            await closeLeague(label: label)
             // Let the Riot Client settle back to its game screen before asking it to log out.
             try await sleep(5)
         }
@@ -458,7 +483,7 @@ final class CycleRunner: ObservableObject {
 
     // MARK: Waits
 
-    private func waitForSignIn(rcu: RCUCredentials) async throws {
+    private func waitForSignIn(rcu: RCUCredentials, label: String) async throws {
         let deadline = Date().addingTimeInterval(Timeout.signIn)
         while Date() < deadline {
             try checkCancel()
@@ -467,10 +492,29 @@ final class CycleRunner: ObservableObject {
             if case .signedIn = await RiotClient.sessionState(credentials: creds) { return }
             // Sometimes League itself comes up first; treat that as signed in too.
             if LCU.discover() != nil { return }
+
+            // The client puts its own error on screen rather than telling the API, so read
+            // the window: a rejected sign-in is worth retrying immediately rather than
+            // sitting out the whole timeout.
+            if let pid = RiotClient.launcherPID,
+               AXControl.containsAnyText(pid: pid, phrases: Self.signInErrorPhrases) {
+                note("[\(label)] the Riot Client is showing a sign-in error.")
+                throw SignInRejectedError()
+            }
             try await sleep(2)
         }
         throw StepError(message: "No sign-in after \(Int(Timeout.signIn))s — a captcha, 2FA, or the wrong window. Nothing was submitted twice.")
     }
+
+    /// What the Riot Client says when it will not sign you in. Matched case-insensitively
+    /// as substrings of any label in its window.
+    private static let signInErrorPhrases = [
+        "failed to sign in",
+        "couldn\u{2019}t sign you in",
+        "couldn't sign you in",
+        "check your username and password",
+        "invalid username or password"
+    ]
 
     private func waitForLeague(label: String) async throws -> LCUCredentials {
         let deadline = Date().addingTimeInterval(Timeout.leagueUp)
