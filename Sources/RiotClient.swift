@@ -114,23 +114,31 @@ enum RiotClient {
 
     enum SessionState { case signedIn(puuid: String), signedOut, unknown }
 
-    /// Is someone signed in? The active-alias endpoint is authoritative: a 200 carrying a
-    /// puuid means signed in, and a 200 without one (or a 4xx) means signed out — even if
-    /// the access token lingers for a moment. Only when that request cannot be reached at
-    /// all do we fall back to the access token, and then to unknown.
+    /// Is someone signed in? Used to detect a *sign-in*, so it errs towards "yes": the
+    /// active alias having a puuid, or the access token being live, both count — because
+    /// right after signing in the token is live while the alias can lag a few seconds.
+    /// (Detecting a sign-*out* is the opposite problem — the token lingers — so that path
+    /// uses `hasActiveAlias` below, not this.)
     static func sessionState(credentials: RCUCredentials) async -> SessionState {
-        if let alias = await request("GET", "/player-account/aliases/v1/active", credentials: credentials) {
-            if alias.status == 200,
-               let object = try? JSONSerialization.jsonObject(with: alias.data) as? [String: Any],
-               let puuid = object["puuid"] as? String, !puuid.isEmpty {
-                return .signedIn(puuid: puuid)
-            }
-            return .signedOut
+        if let has = await hasActiveAlias(credentials: credentials), has {
+            return .signedIn(puuid: "")
         }
         if let token = await request("GET", "/rso-auth/v1/authorization/access-token", credentials: credentials) {
             return token.status == 200 ? .signedIn(puuid: "") : .signedOut
         }
         return .unknown
+    }
+
+    /// Whether an account alias is currently active. This is the authoritative sign-*out*
+    /// signal — it drops the instant the account logs out, whereas the access token can
+    /// linger. Returns true (signed in), false (responded, no account), or nil (unreachable).
+    static func hasActiveAlias(credentials: RCUCredentials) async -> Bool? {
+        guard let alias = await request("GET", "/player-account/aliases/v1/active", credentials: credentials)
+        else { return nil }
+        guard alias.status == 200,
+              let object = try? JSONSerialization.jsonObject(with: alias.data) as? [String: Any],
+              let puuid = object["puuid"] as? String, !puuid.isEmpty else { return false }
+        return true
     }
 
     // MARK: Launching
@@ -257,15 +265,16 @@ enum RiotClient {
         return .failed("The Riot Client would not sign out. Endpoints tried: \(seen.joined(separator: "; ")). It has been left open and running, as asked.")
     }
 
-    /// Polls until the session is gone. `.unknown` (both endpoints silent) falls back to
-    /// League having closed as evidence the account is out.
+    /// Polls until the account alias is gone — the signal that actually drops on logout,
+    /// unlike the access token which lingers. When the alias endpoint cannot be reached,
+    /// League having closed is taken as evidence the account is out.
     private static func waitUntilSignedOut(credentials: RCUCredentials, timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            switch await sessionState(credentials: credentials) {
-            case .signedOut: return true
-            case .signedIn:  break
-            case .unknown:   if LCU.discover() == nil { return true }
+            switch await hasActiveAlias(credentials: credentials) {
+            case .some(false): return true
+            case .some(true):  break
+            case .none:        if LCU.discover() == nil { return true }
             }
             try? await Task.sleep(nanoseconds: 800_000_000)
         }
