@@ -440,6 +440,16 @@ final class CycleRunner: ObservableObject {
             RiotClient.launchLeague(); return
         }
 
+        // The sidebar and Play clicks below are real mouse events at real screen positions,
+        // so the Riot Client has to be the window on top or they land on whatever is
+        // covering it. League Vault is frontmost by this point — it comes back after
+        // typing — and after League is closed for a reopen there is nothing else to raise
+        // the client, which is when this bites.
+        if !Autofill.focusRiotClient() {
+            note("[\(label)] could not bring the Riot Client forward before clicking Play.")
+        }
+        try? await sleep(1)
+
         // The Riot Client sometimes opens on the League Classic page, whose Play launches
         // the wrong mode. Select the normal League icon in the left sidebar first.
         if AXControl.clickLeagueSidebarIcon(pid: pid) {
@@ -454,6 +464,9 @@ final class CycleRunner: ObservableObject {
                 note("[\(label)] League is starting.")
                 return
             }
+            // Re-assert before each click: anything that steals the front between attempts
+            // would otherwise swallow it.
+            _ = Autofill.focusRiotClient()
             if AXControl.clickControl(pid: pid, words: ["play"]) {
                 note("[\(label)] clicked Play (attempt \(attempt + 1)).")
             } else {
