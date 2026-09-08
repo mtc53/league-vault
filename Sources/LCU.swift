@@ -346,6 +346,16 @@ enum LCU {
                               credentials: credentials)
     }
 
+    /// Whether the client's API answers at all.
+    ///
+    /// It starts answering well before the account's data is ready, which is what
+    /// separates a client still loading from one that came up blank — the window that
+    /// shows "&lt;unknown player&gt;" and never finishes.
+    static func isResponding(credentials: LCUCredentials) async -> Bool {
+        (try? await request("GET", "/riotclient/region-locale",
+                            timeout: 4, credentials: credentials)) != nil
+    }
+
     /// Closes the League client cleanly through its own process-control endpoint — the
     /// same as quitting from the app. Returns whether the request was accepted.
     @discardableResult

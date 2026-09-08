@@ -50,7 +50,17 @@ final class CycleRunner: ObservableObject {
         static let signOut: TimeInterval = 30
         static let afterSignIn: TimeInterval = 10   // let the game view load before Play
         static let afterSignOut: TimeInterval = 10  // settle on the login screen before next
+        /// How long the League client may answer without ever producing an account before
+        /// it is judged to have opened blank. Timed from its first reply, not from launch.
+        static let leagueUsable: TimeInterval = 15
     }
+
+    /// How many times one account is attempted when its client keeps opening blank.
+    private static let maxAttempts = 3
+
+    /// The League client came up but never loaded — relaunching it fixes this, so the
+    /// account is started over rather than failed.
+    private struct StuckClientError: Error {}
 
     private weak var store: AccountStore?
     private weak var web: WebDashboard?
@@ -167,21 +177,44 @@ final class CycleRunner: ObservableObject {
                 continue
             }
 
-            do {
-                try await cycleOne(index: index, account: account,
-                                   username: account.loginUsername, password: password,
-                                   iconId: iconId, setIcon: setIcon, clearChallenges: clearChallenges)
-                set(index, .done, "")
-            } catch is CancellationError {
-                break
-            } catch let error as StepError {
-                set(index, .failed, error.message)
-                note("\(account.displayName): \(error.message)")
-                // Best effort: sign this account out before the next one. Never quits.
-                try? await signOutCurrent(label: account.displayName)
-            } catch {
-                set(index, .failed, error.localizedDescription)
+            // A League client that comes up blank never recovers on its own, so that one
+            // account is torn down and run again rather than failed.
+            var attempt = 1
+            var cancelled = false
+            while true {
+                do {
+                    try await cycleOne(index: index, account: account,
+                                       username: account.loginUsername, password: password,
+                                       iconId: iconId, setIcon: setIcon, clearChallenges: clearChallenges)
+                    set(index, .done, "")
+                    break
+                } catch is CancellationError {
+                    cancelled = true
+                    break
+                } catch is StuckClientError {
+                    guard attempt < Self.maxAttempts else {
+                        let message = "The League client kept opening blank (\(Self.maxAttempts) tries)."
+                        set(index, .failed, message)
+                        note("\(account.displayName): \(message)")
+                        try? await signOutCurrent(label: account.displayName)
+                        break
+                    }
+                    note("\(account.displayName): League opened but never loaded — closing it and starting this account over (attempt \(attempt + 1) of \(Self.maxAttempts)).")
+                    set(index, .signingOut, "Restarting this account")
+                    try? await signOutCurrent(label: account.displayName)
+                    attempt += 1
+                } catch let error as StepError {
+                    set(index, .failed, error.message)
+                    note("\(account.displayName): \(error.message)")
+                    // Best effort: sign this account out before the next one. Never quits.
+                    try? await signOutCurrent(label: account.displayName)
+                    break
+                } catch {
+                    set(index, .failed, error.localizedDescription)
+                    break
+                }
             }
+            if cancelled { break }
         }
 
         // Tidy up: sign the last account out so nothing is left logged in.
@@ -263,7 +296,7 @@ final class CycleRunner: ObservableObject {
         set(index, .launchingLeague, "Clicking Play")
         await launchLeague(label: account.displayName)
         set(index, .waitingForClient, "")
-        let credentials = try await waitForLeague()
+        let credentials = try await waitForLeague(label: account.displayName)
 
         // 5. Refresh — link the signed-in summoner to this queue entry.
         set(index, .refreshing, "")
@@ -439,22 +472,38 @@ final class CycleRunner: ObservableObject {
         throw StepError(message: "No sign-in after \(Int(Timeout.signIn))s — a captcha, 2FA, or the wrong window. Nothing was submitted twice.")
     }
 
-    private func waitForLeague() async throws -> LCUCredentials {
+    private func waitForLeague(label: String) async throws -> LCUCredentials {
         let deadline = Date().addingTimeInterval(Timeout.leagueUp)
         var relaunched = false
+        var answeringSince: Date?
+
         while Date() < deadline {
             try checkCancel()
-            if let creds = LCU.discover(),
-               let me = try? await LCU.currentSummoner(credentials: creds), !me.puuid.isEmpty {
-                return creds
+            if let creds = LCU.discover() {
+                if let me = try? await LCU.currentSummoner(credentials: creds), !me.puuid.isEmpty {
+                    return creds
+                }
+                // The API answering while the account never arrives is the blank-client
+                // case: the window is up showing "<unknown player>" and will not recover.
+                // Time it from when the API first replies, so a slow start is not counted.
+                if answeringSince == nil, await LCU.isResponding(credentials: creds) {
+                    answeringSince = Date()
+                    note("[\(label)] League client is up — waiting for it to finish loading.")
+                }
+                if let since = answeringSince,
+                   Date().timeIntervalSince(since) > Timeout.leagueUsable {
+                    throw StuckClientError()
+                }
             }
             // If League has not appeared halfway through, nudge it once more.
             if !relaunched, Date() > deadline.addingTimeInterval(-Timeout.leagueUp / 2) {
                 RiotClient.launchLeague()
                 relaunched = true
             }
-            try await sleep(3)
+            try await sleep(2)
         }
+        // It got as far as existing, so treat it as stuck rather than never launched.
+        if LCU.discover() != nil { throw StuckClientError() }
         throw StepError(message: "The League client did not come up in \(Int(Timeout.leagueUp))s.")
     }
 
