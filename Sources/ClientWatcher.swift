@@ -150,5 +150,4 @@ final class ClientWatcher: ObservableObject {
         status = isClientRunning ? "Rechecking…" : status
     }
 
-    func describeStatus() -> String { status }
 }

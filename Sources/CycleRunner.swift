@@ -115,7 +115,7 @@ final class CycleRunner: ObservableObject {
             let focused = Autofill.focusRiotClient()
             self.note("focusRiotClient() = \(focused); frontmost now: \(self.frontmostName())")
             try? await Task.sleep(nanoseconds: 400_000_000)
-            if let pid = AXControl.riotPID() {
+            if let pid = RiotClient.launcherPID {
                 let fields = await AXControl.loginFieldsWaiting(pid: pid)
                 self.note("login fields — username: \(fields.username != nil ? "found" : "not found"), password: \(fields.password != nil ? "found" : "not found")")
                 if let user = fields.username {
@@ -289,7 +289,7 @@ final class CycleRunner: ObservableObject {
     /// window goes nowhere. If it does not appear, the window is reopened and refocused
     /// once before giving up.
     private func waitForLoginForm(label: String) async -> AXControl.LoginFields {
-        guard let pid = AXControl.riotPID() else { return AXControl.LoginFields() }
+        guard let pid = RiotClient.launcherPID else { return AXControl.LoginFields() }
 
         var fields = await AXControl.loginFieldsWaiting(pid: pid, attempts: 8)
         if fields.found { return fields }
@@ -378,7 +378,7 @@ final class CycleRunner: ObservableObject {
         set(nil, .launchingLeague, "Letting the client finish loading")
         try? await sleep(Timeout.afterSignIn)
 
-        guard let pid = AXControl.riotPID() else {
+        guard let pid = RiotClient.launcherPID else {
             RiotClient.launchLeague(); return
         }
 
@@ -483,21 +483,20 @@ final class CycleRunner: ObservableObject {
 
     private func runQuickPrep(credentials: LCUCredentials, iconId: Int,
                               setIcon: Bool, clearChallenges: Bool, index: Int) async {
-        if setIcon {
-            let owned = await LCU.ownedProfileIcons(credentials: credentials)
-            let choice = QuickPrep.resolvedIcon(preferring: iconId, ownedIcons: owned)
-            do {
-                try await LCU.setProfileIcon(id: choice.id, credentials: credentials)
-                note("\(items[index].name): icon set to \(choice.id)\(choice.fellBack ? " (fell back)" : "").")
-            } catch {
-                note("\(items[index].name): icon failed — \(error.localizedDescription)")
-            }
+        let name = items[index].name
+        let outcome = await LCU.runQuickPrep(credentials: credentials,
+                                             setIcon: setIcon, iconId: iconId,
+                                             clearChallenges: clearChallenges,
+                                             removeFriends: false)   // never, by design
+        if let error = outcome.iconError {
+            note("\(name): icon failed — \(error)")
+        } else if let set = outcome.iconSet {
+            note("\(name): icon set to \(set)\(outcome.iconFellBack ? " (fell back)" : "").")
         }
-        if clearChallenges {
-            let reset = await LCU.clearChallenges(credentials: credentials)
+        if let reset = outcome.challenges {
             note(reset.allSucceeded
-                 ? "\(items[index].name): challenge badges cleared."
-                 : "\(items[index].name): challenge reset was partly refused.")
+                 ? "\(name): challenge badges cleared."
+                 : "\(name): challenge reset was partly refused.")
         }
     }
 

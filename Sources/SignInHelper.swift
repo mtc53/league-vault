@@ -27,18 +27,8 @@ struct SignInHelperSheet: View {
 
     private static let riotClientPath = "/Users/Shared/Riot Games/Riot Client.app"
 
-    private var riotClient: NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first {
-            ($0.localizedName ?? "").hasPrefix("Riot Client")
-                || ($0.bundleIdentifier ?? "").contains("riotgames.RiotClient")
-        }
-    }
-
-    private var leagueClient: NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first {
-            ($0.localizedName ?? "").contains("League of Legends")
-        }
-    }
+    private var riotClient: NSRunningApplication? { RiotClient.launcherApp }
+    private var leagueClient: NSRunningApplication? { RiotClient.leagueApp }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

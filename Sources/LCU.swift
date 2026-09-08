@@ -478,13 +478,6 @@ enum LCU {
     }
 
     /// Test seam: filter a catalogue string without touching the network.
-    static func discoverEndpointsForTest(catalogue: String, keywords: [String]) async -> [String] {
-        allEndpoints(in: catalogue).filter { path in
-            keywords.contains { path.lowercased().contains($0) }
-        }
-    }
-
-    /// Every plugin the client has loaded, from the `Plugin <name>` tags.
     static func allPlugins(in catalogue: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: #""Plugin ([a-z0-9-]+)""#) else { return [] }
         let range = NSRange(catalogue.startIndex..., in: catalogue)
@@ -964,6 +957,60 @@ enum LCU {
 
     /// Icon ids this account actually owns. The client accepts any id, but Riot resets
     /// an unowned one server-side, so quick prep checks before choosing.
+    /// What one quick-prep pass did. Callers word their own report from it — the client
+    /// sheet and the account cycle describe the same actions differently.
+    struct QuickPrepOutcome {
+        var iconRequested: Int?
+        var iconSet: Int?
+        var iconFellBack = false
+        var iconError: String?
+        var challenges: ChallengeReset?
+        var friendsRemoved: Int?
+        var friendsFailed: Int?
+    }
+
+    /// Sets the profile icon, clears the challenge badges, and optionally removes every
+    /// friend — the sequence behind both the Quick prep button and the account cycle.
+    /// `stage` reports what it is doing, for a progress line.
+    static func runQuickPrep(credentials: LCUCredentials,
+                             setIcon: Bool, iconId: Int,
+                             clearChallenges: Bool,
+                             removeFriends: Bool,
+                             stage: ((String) -> Void)? = nil) async -> QuickPrepOutcome {
+        var outcome = QuickPrepOutcome()
+
+        if setIcon {
+            outcome.iconRequested = iconId
+            stage?("Checking icon ownership…")
+            let owned = await ownedProfileIcons(credentials: credentials)
+            let choice = QuickPrep.resolvedIcon(preferring: iconId, ownedIcons: owned)
+
+            stage?("Setting profile icon…")
+            do {
+                try await setProfileIcon(id: choice.id, credentials: credentials)
+                outcome.iconSet = choice.id
+                outcome.iconFellBack = choice.fellBack
+            } catch {
+                outcome.iconError = error.localizedDescription
+            }
+        }
+
+        if clearChallenges {
+            stage?("Clearing challenge badges…")
+            // Qualified: the `clearChallenges` parameter shadows the function name here.
+            outcome.challenges = await Self.clearChallenges(credentials: credentials)
+        }
+
+        if removeFriends {
+            let result = await removeAllFriends(credentials: credentials) { done, total in
+                stage?("Removing friend \(done) of \(total)…")
+            }
+            outcome.friendsRemoved = result.removed
+            outcome.friendsFailed = result.failed
+        }
+        return outcome
+    }
+
     static func ownedProfileIcons(credentials: LCUCredentials) async -> Set<Int> {
         let paths = [
             "/lol-inventory/v2/inventory/SUMMONER_ICON",

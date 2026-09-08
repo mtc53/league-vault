@@ -16,19 +16,6 @@ enum AXControl {
         var found: Bool { username != nil || password != nil }
     }
 
-    /// The Riot Client launcher's process id (not League, not the crash handler).
-    static func riotPID() -> pid_t? {
-        let apps = NSWorkspace.shared.runningApplications.filter { app in
-            let n = (app.localizedName ?? "").lowercased()
-            let b = (app.bundleIdentifier ?? "").lowercased()
-            if n.contains("league") || b.contains("leagueoflegends") { return false }
-            if n.contains("crash") { return false }
-            return n.contains("riot") || b.contains("riotgames")
-        }
-        let target = apps.first { $0.activationPolicy == .regular } ?? apps.first
-        return target?.processIdentifier
-    }
-
     /// Asks an Electron/Chromium app to expose its accessibility tree.
     private static func enableManualAccessibility(_ app: AXUIElement) {
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
@@ -173,31 +160,6 @@ enum AXControl {
         return true
     }
 
-    /// Clicks a control whose label contains `phrase` (e.g. "sign out"), preferring a real
-    /// button over a paragraph that happens to contain the same words.
-    @discardableResult
-    static func clickPhrase(pid: pid_t, phrase: String) -> Bool {
-        let app = AXUIElementCreateApplication(pid)
-        enableManualAccessibility(app)
-        let needle = phrase.lowercased()
-
-        var best: (rect: CGRect, isButton: Bool)?
-        var stack = children(app)
-        var visited = 0
-        while let el = stack.popLast(), visited < 8000 {
-            visited += 1
-            if title(el).lowercased().contains(needle), let f = frame(el) {
-                let isButton = role(el) == "AXButton"
-                if best == nil || (isButton && !(best!.isButton)) { best = (f, isButton) }
-                if isButton { break }
-            }
-            stack.append(contentsOf: children(el))
-        }
-        guard let target = best else { return false }
-        click(in: target.rect)
-        return true
-    }
-
     /// Clicks the normal League of Legends icon in the Riot Client's left sidebar, so the
     /// main panel shows the normal League page and not the Classic (or TFT) one. Matched by
     /// label, excluding the other modes, and restricted to the far-left strip so the big
@@ -226,6 +188,8 @@ enum AXControl {
         return true
     }
 
+    // MARK: Windows
+
     /// Raises the app's windows and un-minimises them.
     ///
     /// Activating an application does not necessarily bring its windows forward — after a
@@ -245,36 +209,5 @@ enum AXControl {
             AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         }
         return true
-    }
-
-    // MARK: Windows
-
-    private static func windowFrame(_ win: AXUIElement) -> CGRect? {
-        guard let posRef = attr(win, kAXPositionAttribute as String),
-              let sizeRef = attr(win, kAXSizeAttribute as String),
-              CFGetTypeID(posRef) == AXValueGetTypeID(),
-              CFGetTypeID(sizeRef) == AXValueGetTypeID() else { return nil }
-        var pos = CGPoint.zero, size = CGSize.zero
-        AXValueGetValue(posRef as! AXValue, .cgPoint, &pos)
-        AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
-        guard size.width > 200, size.height > 150 else { return nil }   // a real window, not a chip
-        return CGRect(origin: pos, size: size)
-    }
-
-    /// The app's main window frame, for clicking chrome (like the close button) that has no
-    /// accessible label of its own.
-    static func mainWindowFrame(pid: pid_t) -> CGRect? {
-        let app = AXUIElementCreateApplication(pid)
-        enableManualAccessibility(app)
-        if let ref = attr(app, kAXMainWindowAttribute as String),
-           CFGetTypeID(ref) == AXUIElementGetTypeID(),
-           let f = windowFrame(ref as! AXUIElement) {
-            return f
-        }
-        if let windows = attr(app, kAXWindowsAttribute as String) as? [AXUIElement] {
-            // The largest window is the client, not a tooltip or toast.
-            return windows.compactMap(windowFrame).max { $0.width * $0.height < $1.width * $1.height }
-        }
-        return nil
     }
 }

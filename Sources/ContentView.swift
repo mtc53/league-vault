@@ -89,7 +89,7 @@ struct ContentView: View {
         case .region:
             list.sort { ($0.region.display, $0.displayName) < ($1.region.display, $1.displayName) }
         case .rank:
-            list.sort { rankWeight($0) > rankWeight($1) }
+            list.sort { $0.soloRank.sortWeight > $1.soloRank.sortWeight }
         case .lastPlayed:
             list.sort { ($0.lastGame?.playedAt ?? .distantPast) > ($1.lastGame?.playedAt ?? .distantPast) }
         case .idle:
@@ -98,17 +98,6 @@ struct ContentView: View {
             list.sort { ($0.daysSinceLastGame ?? -1) > ($1.daysSinceLastGame ?? -1) }
         }
         return list
-    }
-
-    private func rankWeight(_ a: Account) -> Int {
-        let r = a.soloRank
-        guard r.tier != .unranked else {
-            // Unranked: order by peak, but always beneath anyone currently ranked.
-            return (Tier.allCases.firstIndex(of: r.peakTier) ?? 0) * 100
-        }
-        let tierIndex = Tier.allCases.firstIndex(of: r.tier) ?? 0
-        let divisionIndex = r.tier.isApex ? 4 : (4 - (Division.allCases.firstIndex(of: r.division) ?? 0))
-        return tierIndex * 10_000 + divisionIndex * 1_000 + r.lp
     }
 
     /// Folder name → accounts, unfiled last.

@@ -49,27 +49,23 @@ final class ClientModel: ObservableObject {
         busy = true
         defer { busy = false; friendProgress = nil }
 
-        var report: [String] = []
-
-        if setIcon {
-            friendProgress = "Checking icon ownership…"
-            let owned = await LCU.ownedProfileIcons(credentials: credentials)
-            let choice = QuickPrep.resolvedIcon(preferring: iconId, ownedIcons: owned)
-
-            friendProgress = "Setting profile icon…"
-            do {
-                try await LCU.setProfileIcon(id: choice.id, credentials: credentials)
-                report.append(choice.fellBack
-                    ? "Icon \(iconId) is not owned — set \(choice.id) instead."
-                    : "Icon set to \(choice.id).")
-            } catch {
-                report.append("Icon failed: \(error.localizedDescription)")
-            }
+        let outcome = await LCU.runQuickPrep(credentials: credentials,
+                                             setIcon: setIcon, iconId: iconId,
+                                             clearChallenges: clearChallenges,
+                                             removeFriends: removeFriends) { text in
+            self.friendProgress = text
         }
 
-        if clearChallenges {
-            friendProgress = "Clearing challenge badges…"
-            let reset = await LCU.clearChallenges(credentials: credentials)
+        var report: [String] = []
+        if let error = outcome.iconError {
+            report.append("Icon failed: \(error)")
+        } else if let set = outcome.iconSet {
+            report.append(outcome.iconFellBack
+                ? "Icon \(outcome.iconRequested ?? set) is not owned — set \(set) instead."
+                : "Icon set to \(set).")
+        }
+
+        if let reset = outcome.challenges {
             if reset.allSucceeded {
                 report.append("Challenge badges, title and banner cleared.")
             } else {
@@ -83,13 +79,11 @@ final class ClientModel: ObservableObject {
             }
         }
 
-        if removeFriends {
-            let result = await LCU.removeAllFriends(credentials: credentials) { done, total in
-                self.friendProgress = "Removing friend \(done) of \(total)…"
-            }
-            report.append(result.failed == 0
-                ? "Removed \(result.removed) friends."
-                : "Removed \(result.removed) friends, \(result.failed) failed.")
+        if let removed = outcome.friendsRemoved {
+            let failed = outcome.friendsFailed ?? 0
+            report.append(failed == 0
+                ? "Removed \(removed) friends."
+                : "Removed \(removed) friends, \(failed) failed.")
         }
 
         await probe()

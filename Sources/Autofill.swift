@@ -9,10 +9,6 @@ enum Autofill {
     /// more often, the moment a rebuild invalidates it.
     static var isPermitted: Bool { AXIsProcessTrusted() }
 
-    /// True when macOS lists the app under Accessibility but the signature no longer
-    /// matches — the toggle looks on while the permission is dead.
-    static var looksStale: Bool { !AXIsProcessTrusted() }
-
     /// Shows macOS's own "grant accessibility" prompt.
     static func requestPermission() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -90,30 +86,13 @@ enum Autofill {
         usleep(20000)
     }
 
-    /// The Riot Client launcher — not League, not the crash handler. Matched loosely
-    /// because the visible app has been named "Riot Client" and "RiotClientUx" across
-    /// versions, and its bundle id is com.riotgames.RiotGames.RiotClient.
-    private static func isRiotLauncher(_ app: NSRunningApplication) -> Bool {
-        let name = (app.localizedName ?? "").lowercased()
-        let bid = (app.bundleIdentifier ?? "").lowercased()
-        if name.contains("league") || bid.contains("leagueoflegends") { return false }
-        if name.contains("crash") { return false }
-        return name.contains("riot") || bid.contains("riotgames")
-    }
-
-    private static func riotLauncher() -> NSRunningApplication? {
-        let apps = NSWorkspace.shared.runningApplications.filter(isRiotLauncher)
-        // A window-bearing app first; helpers only as a last resort.
-        return apps.first { $0.activationPolicy == .regular } ?? apps.first
-    }
-
     /// Brings the Riot Client forward so the keystrokes land in it. Returns whether it is
     /// now frontmost — `activate()`'s own return value is unreliable, so this checks.
     @discardableResult
     static func focusRiotClient() -> Bool {
-        guard riotLauncher() != nil else { return false }
+        guard RiotClient.launcherApp != nil else { return false }
         for _ in 0..<6 {
-            guard let app = riotLauncher() else { return false }
+            guard let app = RiotClient.launcherApp else { return false }
             app.unhide()
             app.activate(options: [.activateAllWindows])
             // Activating the app is not the same as raising its windows: after a sign-out
@@ -121,18 +100,12 @@ enum Autofill {
             // everything. Ask for the raise explicitly.
             AXControl.raiseWindows(pid: app.processIdentifier)
             usleep(450_000)
-            if let front = NSWorkspace.shared.frontmostApplication, isRiotLauncher(front) {
+            if let front = NSWorkspace.shared.frontmostApplication, RiotClient.isLauncher(front) {
                 return true
             }
         }
         // Found it but could not confirm it came forward; let the caller decide.
         return false
-    }
-
-    /// True when the Riot Client is the frontmost app right now.
-    static var riotClientIsFrontmost: Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
-        return isRiotLauncher(front)
     }
 
     /// Fills the login form: username, Tab, password. Never presses Return — submitting

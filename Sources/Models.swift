@@ -153,6 +153,16 @@ struct RankEntry: Codable, Hashable, Identifiable {
         return tierIndex * 10 + divisionIndex
     }
 
+    /// Orders accounts in a list: ladder position with LP as the tiebreak. An unranked
+    /// account is placed by its peak, always beneath anyone currently ranked — the highest
+    /// possible peak scores 1,000 against a floor of 11,000 for the lowest live rank.
+    var sortWeight: Int {
+        guard tier != .unranked else {
+            return (Tier.allCases.firstIndex(of: peakTier) ?? 0) * 100
+        }
+        return RankEntry.ladderPosition(tier: tier, division: division) * 1_000 + lp
+    }
+
     /// "Gold II", or just "Master" for apex tiers. nil when no peak was entered.
     var peakDisplay: String? {
         guard hasPeak else { return nil }

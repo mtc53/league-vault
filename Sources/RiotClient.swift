@@ -104,11 +104,36 @@ enum RiotClient {
 
     // MARK: State
 
-    /// Whether a process named like the Riot Client is running at all.
-    static var isRunning: Bool {
-        NSWorkspace.shared.runningApplications.contains {
-            ($0.localizedName ?? "").hasPrefix("Riot Client")
-                || ($0.bundleIdentifier ?? "").contains("riotgames")
+    /// Is this the Riot Client launcher — not League, not the crash handler?
+    ///
+    /// The single definition everything else uses. Matched loosely because the visible app
+    /// has been named "Riot Client" and "RiotClientUx" across versions, and its bundle id
+    /// is com.riotgames.RiotGames.RiotClient — which, note, does not contain the substring
+    /// "riotgames.RiotClient".
+    static func isLauncher(_ app: NSRunningApplication) -> Bool {
+        let name = (app.localizedName ?? "").lowercased()
+        let bid = (app.bundleIdentifier ?? "").lowercased()
+        if name.contains("league") || bid.contains("leagueoflegends") { return false }
+        if name.contains("crash") { return false }
+        return name.contains("riot") || bid.contains("riotgames")
+    }
+
+    /// The running launcher, preferring the window-bearing process over a helper.
+    static var launcherApp: NSRunningApplication? {
+        let apps = NSWorkspace.shared.runningApplications.filter(isLauncher)
+        return apps.first { $0.activationPolicy == .regular } ?? apps.first
+    }
+
+    static var launcherPID: pid_t? { launcherApp?.processIdentifier }
+
+    /// Whether the Riot Client launcher is running at all.
+    static var isRunning: Bool { launcherApp != nil }
+
+    /// The running League client, if any.
+    static var leagueApp: NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first {
+            ($0.localizedName ?? "").lowercased().contains("league")
+                || ($0.bundleIdentifier ?? "").lowercased().contains("leagueoflegends")
         }
     }
 
@@ -222,10 +247,6 @@ enum RiotClient {
         case signedOut          // the endpoint logged the account out
         case alreadyOut         // nobody was signed in to begin with
         case failed(String)     // could not sign out; the client is left open and running
-
-        var isClear: Bool {
-            switch self { case .signedOut, .alreadyOut: return true; case .failed: return false }
-        }
     }
 
     /// Every logout spelling that has shipped, tried together each round.
