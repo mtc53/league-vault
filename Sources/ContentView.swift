@@ -141,9 +141,14 @@ struct ContentView: View {
             detail
         }
         .toolbar { toolbarContent }
-        .onChange(of: watcher.pending) { _, signIn in
-            guard let signIn else { return }
-            Task { await handleClientSignIn(signIn) }
+        .onChange(of: watcher.lastMessage) { _, message in
+            guard let message else { return }
+            banner = Banner(text: message.text, isError: message.isError)
+        }
+        .onChange(of: watcher.wantsReveal) { _, wants in
+            guard wants else { return }
+            watcher.wantsReveal = false
+            revealSignedInAccount()
         }
         .sheet(isPresented: $creatingNew) {
             AccountEditor(account: Account(), isNew: true, knownFolders: allFolders) { saved in
@@ -551,6 +556,14 @@ struct ContentView: View {
             .pickerStyle(.menu)
             .frame(width: 130)
 
+            Button { revealSignedInAccount() } label: {
+                Label("Signed-in Account", systemImage: "person.crop.circle.badge.checkmark")
+            }
+            .disabled(signedInAccount == nil)
+            .keyboardShortcut("l", modifiers: .command)
+            .help(watcher.signedInAs.map { "Jump to \($0), signed in to the client right now" }
+                  ?? "Nobody is signed in to the League client")
+
             Button {
                 Task { await refreshAll() }
             } label: {
@@ -639,56 +652,33 @@ struct ContentView: View {
         return text
     }
 
-    // MARK: Automatic refresh
+    // MARK: The signed-in account
 
-    /// Which vault entry the client's current sign-in belongs to.
-    ///
-    /// Identity first, then Riot ID. Failing both, an entry added with only a login has
-    /// no identity yet and is waiting to adopt one — but only when there is exactly one
-    /// such entry, because guessing between two would attach the wrong account.
-    private func autoRefreshTarget(for me: LCUSummoner) -> Account? {
-        if !me.puuid.isEmpty,
-           let match = store.accounts.first(where: { $0.puuid == me.puuid }) {
-            return match
-        }
-        if let match = store.accounts.first(where: {
-            !$0.gameName.isEmpty && $0.riotID.compare(me.riotID, options: .caseInsensitive) == .orderedSame
-        }) {
-            return match
-        }
-        let waiting = store.accounts.filter(\.isUnidentified)
-        return waiting.count == 1 ? waiting[0] : nil
-    }
-
-    /// Runs when the watcher sees somebody sign in to the client.
-    private func handleClientSignIn(_ signIn: ClientWatcher.SignIn) async {
-        defer { watcher.clearPending() }
-        let me = signIn.summoner
-
-        guard let target = autoRefreshTarget(for: me) else {
-            banner = Banner(text: "The client signed in as \(me.riotID), which matches no entry here. Add it, or select an entry and press Refresh to link it.",
-                            isError: false)
+    /// Selects whichever account the League client is signed in to, so it can be opened
+    /// without hunting for it in the sidebar.
+    private func revealSignedInAccount() {
+        guard let match = signedInAccount else {
+            banner = Banner(text: watcher.signedInAs.map {
+                "The client is signed in as \($0), which matches no entry here."
+            } ?? "Nobody is signed in to the League client.", isError: false)
             return
         }
-        guard !refreshingIDs.contains(target.id) else { return }
-
-        switch await refresh(target) {
-        case .updated(let text):
-            banner = Banner(text: text, isError: false)
-            await publishAfterRefresh()
-        case .skipped(let text):
-            banner = Banner(text: text, isError: false)
-        case .failed(let text):
-            banner = Banner(text: text, isError: true)
-        }
+        // Clear anything that would filter it out of the list first.
+        search = ""
+        championOnly = nil
+        penaltiesOnly = false
+        selection = match.id
     }
 
-    /// Pushes the change straight out rather than waiting for the publish debounce, so
-    /// signing in to an account and seeing the page update is one continuous motion.
-    private func publishAfterRefresh() async {
-        guard web.isEnabled, web.isConfigured else { return }
-        if await web.publish(reason: "auto-refresh") == false, let error = web.lastError {
-            banner = Banner(text: error, isError: true)
+    /// The vault entry for whoever is signed in, by identity then Riot ID.
+    private var signedInAccount: Account? {
+        if let puuid = watcher.signedInPuuid, !puuid.isEmpty,
+           let match = store.accounts.first(where: { $0.puuid == puuid }) {
+            return match
+        }
+        guard let riotID = watcher.signedInAs else { return nil }
+        return store.accounts.first {
+            !$0.gameName.isEmpty && $0.riotID.compare(riotID, options: .caseInsensitive) == .orderedSame
         }
     }
 

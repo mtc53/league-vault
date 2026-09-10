@@ -525,6 +525,40 @@ switch, driven through its API. That means:
 Which is enough for staying off friends' lists, and needs no proxy, no certificate, and
 nothing sitting in front of the client's traffic.
 
+## Living in the menu bar
+
+Closing the window puts League Vault away rather than quitting it. It drops out of the
+Dock and the app switcher, leaves an icon in the menu bar, and keeps doing the automatic
+work: refreshing whichever account signs in to the client, holding the offline status, and
+republishing the page. Quitting is **Quit League Vault** in that menu, or ⌘Q.
+
+The menu shows what the watcher is doing and offers the switches worth reaching without
+opening the window — refresh on sign-in, appear offline, publish now — plus **Go to
+&lt;account&gt;** when someone is signed in, which opens the window with that account already
+selected.
+
+For this to be true rather than a claim, the automatic refresh had to move out of the
+window. It lives in the watcher now, which owns the store and the dashboard directly; the
+window only shows what it did. Nothing in the automation depends on a view being on screen.
+
+### The Keychain prompt
+
+A Keychain ACL is tied to the exact binary, so **every rebuild raises a fresh "allow
+access?" prompt** for the vault key. That prompt blocks whichever thread asked for the key
+— and reading it during launch used to freeze the app before its window existed, which for
+a menu bar app looks like nothing happening at all.
+
+The key is now read the first time a password is actually handled, never at launch. The
+window comes up either way, and the prompt only appears when it is really needed. Choose
+**Always Allow** and it will not ask again until the next rebuild.
+
+## The signed-in account
+
+**Signed-in Account** in the toolbar (⌘L), and **Go to &lt;account&gt;** in the menu bar, jump
+straight to whichever account the League client is signed in to — matched by identity
+first, then Riot ID — instead of hunting for it in the sidebar. It clears the search and
+any champion or penalty filter first, so the account cannot be selected but hidden.
+
 ## Refreshing by itself
 
 Settings → **Refresh by itself**, on by default.

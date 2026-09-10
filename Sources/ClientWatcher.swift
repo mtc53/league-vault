@@ -16,28 +16,35 @@ final class ClientWatcher: ObservableObject {
         }
     }
 
-    /// Set when a sign-in has been seen that has not been refreshed yet. The view
-    /// clears it once it has acted.
-    @Published private(set) var pending: SignIn?
+    /// The last thing the watcher did, for the window to show as a banner when it is
+    /// open. Nothing depends on anyone reading it — the work happens either way.
+    @Published var lastMessage: Banner?
+
+    /// Raised by the menu bar to ask the window to select the signed-in account.
+    @Published var wantsReveal = false
 
     @Published private(set) var isClientRunning = false
     @Published private(set) var signedInAs: String?
+    /// The signed-in account's identity, for jumping straight to it in the sidebar.
+    @Published private(set) var signedInPuuid: String?
     @Published private(set) var lastHandled: Date?
     /// When presence was last put back to offline, for the settings line.
     @Published private(set) var lastOfflineRestore: Date?
     @Published private(set) var status = "Not watching."
 
-    struct SignIn: Identifiable, Equatable {
+    struct Banner: Identifiable, Equatable {
         let id = UUID()
-        var summoner: LCUSummoner
-        var seenAt = Date()
+        var text: String
+        var isError = false
 
-        static func == (a: SignIn, b: SignIn) -> Bool { a.id == b.id }
+        static func == (a: Banner, b: Banner) -> Bool { a.id == b.id }
     }
 
     private enum Keys { static let enabled = "autoRefreshOnClient" }
 
     private let defaults = UserDefaults.standard
+    private weak var store: AccountStore?
+    private weak var web: WebDashboard?
     private var loop: Task<Void, Never>?
     /// Held while the account cycle drives the client itself, so the two do not fight
     /// over the same sign-in.
@@ -81,15 +88,22 @@ final class ClientWatcher: ObservableObject {
         loop = nil
         isClientRunning = false
         signedInAs = nil
+        signedInPuuid = nil
         handledPuuid = nil
-        pending = nil
         status = "Not watching."
+    }
+
+    /// Everything the watcher needs to do the refresh itself. It deliberately does not
+    /// go through the window: the whole point is that this keeps working with the window
+    /// closed and the app sitting in the menu bar.
+    func attach(store: AccountStore, web: WebDashboard) {
+        self.store = store
+        self.web = web
     }
 
     /// The cycle takes over sign-ins while it runs; the watcher stands down.
     func suspend() {
         isSuspended = true
-        pending = nil
         status = "Paused while the account cycle runs."
     }
 
@@ -107,6 +121,7 @@ final class ClientWatcher: ObservableObject {
             if isClientRunning {
                 isClientRunning = false
                 signedInAs = nil
+                signedInPuuid = nil
                 // A restart should refresh again even for the same account.
                 handledPuuid = nil
                 status = "League client is closed."
@@ -129,6 +144,7 @@ final class ClientWatcher: ObservableObject {
         }
 
         signedInAs = me.riotID
+        signedInPuuid = me.puuid
 
         // Riot puts presence back to online on its own — entering a lobby or a game does
         // it — so while "appear offline" is on, put it back whenever it drifts.
@@ -148,14 +164,65 @@ final class ClientWatcher: ObservableObject {
         handledPuuid = me.puuid
         lastHandled = Date()
         status = "Signed in as \(me.riotID) — refreshing."
-        pending = SignIn(summoner: me)
+        await refresh(me, credentials: credentials)
+        status = "Watching \(me.riotID)."
         return Pace.settled
     }
 
-    // MARK: Talking to the view
+    // MARK: The refresh itself
 
-    /// Called once the view has refreshed (or decided it cannot).
-    func clearPending() { pending = nil }
+    /// Which vault entry this sign-in belongs to.
+    ///
+    /// Identity first, then Riot ID. Failing both, an entry added with only a login has
+    /// no identity yet and is waiting to adopt one — but only when there is exactly one
+    /// such entry, because guessing between two would attach the wrong account.
+    private func target(for me: LCUSummoner, in store: AccountStore) -> Account? {
+        if !me.puuid.isEmpty,
+           let match = store.accounts.first(where: { $0.puuid == me.puuid }) {
+            return match
+        }
+        if let match = store.accounts.first(where: {
+            !$0.gameName.isEmpty && $0.riotID.compare(me.riotID, options: .caseInsensitive) == .orderedSame
+        }) {
+            return match
+        }
+        let waiting = store.accounts.filter(\.isUnidentified)
+        return waiting.count == 1 ? waiting[0] : nil
+    }
+
+    private func refresh(_ me: LCUSummoner, credentials: LCUCredentials) async {
+        guard let store else { return }
+        guard let entry = target(for: me, in: store) else {
+            lastMessage = Banner(text: "The client signed in as \(me.riotID), which matches no entry here. Add it, or select an entry and press Refresh to link it.")
+            return
+        }
+        guard let snapshot = try? await LCU.snapshot(credentials: credentials) else {
+            lastMessage = Banner(text: "Could not read \(entry.displayName) from the client.", isError: true)
+            return
+        }
+        guard var current = store.accounts.first(where: { $0.id == entry.id }) else { return }
+
+        let before = current.riotID
+        let wasUnidentified = current.isUnidentified
+        current.applySnapshot(snapshot)
+        store.update(current)
+
+        if wasUnidentified {
+            lastMessage = Banner(text: "Linked to \(current.riotID) and filled in.")
+        } else if !before.isEmpty && before != current.riotID {
+            lastMessage = Banner(text: "Riot ID changed: \(before) → \(current.riotID).")
+        } else {
+            lastMessage = Banner(text: "Updated \(current.displayName) from the League client.")
+        }
+
+        // Push it straight out rather than waiting for the publish debounce, so signing
+        // in and seeing the page update is one motion.
+        if let web, web.isEnabled, web.isConfigured {
+            _ = await web.publish(reason: "auto-refresh")
+        }
+    }
+
+    // MARK: Talking to the view
 
     /// Makes the next poll offer the current sign-in again — used by "Refresh now".
     func forgetHandled() {

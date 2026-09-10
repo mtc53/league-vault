@@ -3,6 +3,10 @@ import AppKit
 
 @main
 struct LeagueVaultApp: App {
+    /// The one window, named so the menu bar can reopen it after it has been closed.
+    static let mainWindowID = "vault"
+
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store = AccountStore()
     @StateObject private var remote = RemoteServer()
     @StateObject private var web = WebDashboard()
@@ -27,7 +31,7 @@ struct LeagueVaultApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("League Vault") {
+        WindowGroup("League Vault", id: Self.mainWindowID) {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(remote)
@@ -36,10 +40,22 @@ struct LeagueVaultApp: App {
                 .environmentObject(cycle)
                 .task {
                     web.attach(to: store, remote: remote)
+                    watcher.attach(store: store, web: web)
                     cycle.attach(store: store, web: web, watcher: watcher)
                 }
         }
         .defaultSize(width: 1100, height: 720)
+
+        // The app keeps running with its window closed — the watcher still refreshes
+        // whoever signs in and still holds the offline status — so it needs somewhere to
+        // live and a way back.
+        MenuBarExtra("League Vault", systemImage: "shield.lefthalf.filled") {
+            MenuBarContent()
+                .environmentObject(store)
+                .environmentObject(watcher)
+                .environmentObject(web)
+        }
+
         .commands {
             CommandGroup(replacing: .newItem) { }
             CommandGroup(after: .appInfo) {

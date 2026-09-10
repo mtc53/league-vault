@@ -62,21 +62,35 @@ enum Keychain {
 
 /// Encrypts stored passwords with an AES-256 key that lives in the login Keychain,
 /// so the on-disk JSON never contains a readable password.
-struct Vault {
-    private let key: SymmetricKey?
+/// The key is fetched the first time a password is actually handled, never at launch.
+///
+/// A Keychain ACL is tied to the exact binary, so every rebuild raises a fresh "allow
+/// access?" prompt — and that prompt blocks whatever thread asked for the key. Reading it
+/// in `init` therefore froze the app before its window existed, which as a menu bar app
+/// looks like nothing happening at all. Deferring it means the window comes up and the
+/// prompt only appears when a password is read or written.
+final class Vault {
+    private var key: SymmetricKey?
+    private var resolved = false
 
     /// Set when the key exists but could not be read — a denied Keychain prompt, a
-    /// locked keychain. Distinct from "there is no key yet".
-    let unavailableReason: String?
+    /// locked keychain. Distinct from "there is no key yet". Nil until the key is needed.
+    private(set) var unavailableReason: String?
 
-    var isAvailable: Bool { key != nil }
+    var isAvailable: Bool { resolve(); return key != nil }
 
-    init() {
+    /// True once the Keychain has actually been consulted, so callers can tell a real
+    /// "no problem" from "not asked yet".
+    var hasResolved: Bool { resolved }
+
+    private func resolve() {
+        guard !resolved else { return }
+        resolved = true
+
         let (data, status) = Keychain.readWithStatus("vault-key")
 
         if let data, data.count == 32 {
             key = SymmetricKey(data: data)
-            unavailableReason = nil
             return
         }
 
@@ -87,25 +101,22 @@ struct Vault {
             let raw = fresh.withUnsafeBytes { Data($0) }
             if Keychain.write(raw, account: "vault-key") {
                 key = fresh
-                unavailableReason = nil
             } else {
-                key = nil
                 unavailableReason = "Could not save the encryption key to your Keychain, so passwords cannot be stored."
             }
 
         case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed, errSecInteractionRequired:
             // The key exists but is not readable right now. Minting a replacement here
             // would overwrite it and make every stored password unrecoverable.
-            key = nil
             unavailableReason = "League Vault was denied access to its Keychain key, so saved passwords can't be read. Quit and reopen, and choose “Always Allow” when macOS asks. Nothing has been overwritten."
 
         default:
-            key = nil
             unavailableReason = "Keychain error \(status) reading the encryption key. Saved passwords can't be read; nothing has been overwritten."
         }
     }
 
     func seal(_ plaintext: String) -> String? {
+        resolve()
         guard !plaintext.isEmpty, let key else { return nil }
         guard let data = plaintext.data(using: .utf8),
               let box = try? AES.GCM.seal(data, using: key),
@@ -114,6 +125,7 @@ struct Vault {
     }
 
     func open(_ sealed: String?) -> String? {
+        resolve()
         guard let key else { return nil }
         guard let sealed, let data = Data(base64Encoded: sealed),
               let box = try? AES.GCM.SealedBox(combined: data),
@@ -142,8 +154,7 @@ final class AccountStore: ObservableObject {
 
     init() {
         fileURL = Self.directory.appendingPathComponent("accounts.json")
-        vaultWarning = vault.unavailableReason
-        load()
+        load()   // decodes the file; passwords stay sealed, so no Keychain call yet
     }
 
     var canStorePasswords: Bool { vault.isAvailable }
@@ -266,11 +277,13 @@ final class AccountStore: ObservableObject {
     // MARK: Passwords
 
     func password(for account: Account) -> String? {
-        vault.open(account.encryptedPassword)
+        defer { vaultWarning = vault.unavailableReason }
+        return vault.open(account.encryptedPassword)
     }
 
     func encrypt(_ password: String) -> String? {
-        vault.seal(password)
+        defer { vaultWarning = vault.unavailableReason }
+        return vault.seal(password)
     }
 
     // MARK: Export
