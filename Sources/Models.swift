@@ -452,6 +452,7 @@ enum QuickPrep {
         static let removeFriends = "prepRemoveFriends"
         static let rename = "prepRename"
         static let namePool = "prepNamePoolPath"
+        static let offline = "prepAppearOffline"
     }
 
     static var iconId: Int {
@@ -488,6 +489,14 @@ enum QuickPrep {
     static var removesFriends: Bool {
         get { UserDefaults.standard.bool(forKey: Keys.removeFriends) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.removeFriends) }
+    }
+
+    /// Keep the account showing as offline in chat. Riot resets this on its own —
+    /// entering a lobby or a game is the usual trigger — so it is re-asserted whenever
+    /// the client is seen drifting back online.
+    static var appearsOffline: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.offline) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.offline) }
     }
 
     /// Off by default: renaming spends a name and cannot be undone.

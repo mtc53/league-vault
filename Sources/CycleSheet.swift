@@ -11,6 +11,7 @@ struct CycleSheet: View {
     @State private var iconId = QuickPrep.iconId
     @State private var clearChallenges = QuickPrep.clearsChallenges
     @State private var renames = QuickPrep.renames
+    @State private var appearOffline = QuickPrep.appearsOffline
     @State private var namePoolPath = QuickPrep.namePoolPath
     @State private var confirmed = false
 
@@ -73,7 +74,7 @@ struct CycleSheet: View {
                     step(1, "Sign out whatever is signed in", "Through the Riot Client's own logout — it is left open, never force-quit.")
                     step(2, "Type the login and submit", "Synthetic keystrokes into the Riot Client, then Return.")
                     step(3, "Launch League and refresh", "Rank, last game, champions, wallet, penalties.")
-                    step(4, "Quick prep", "Rename, icon and challenge reset — never friends.")
+                    step(4, "Quick prep", "Rename, icon, challenge reset, appear offline — never friends.")
                     step(5, "Publish and go to the next", "If the web dashboard is on.")
                 }
                 .padding(12)
@@ -98,6 +99,16 @@ struct CycleSheet: View {
                     Toggle("Rename each account from a name list", isOn: $renames)
                         .toggleStyle(.checkbox)
                     if renames { namePoolPicker }
+
+                    Toggle("Appear offline in chat", isOn: $appearOffline)
+                        .toggleStyle(.checkbox)
+                    if appearOffline {
+                        Text("Sets each account's chat status to offline, and puts it back whenever Riot resets it.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 18)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     Label("Friends are never removed by the cycle.", systemImage: "person.2")
                         .font(.system(size: 11))
@@ -352,6 +363,7 @@ struct CycleSheet: View {
         QuickPrep.iconId = iconId
         QuickPrep.clearsChallenges = clearChallenges
         QuickPrep.renames = renames && !namePoolPath.isEmpty
+        QuickPrep.appearsOffline = appearOffline
         QuickPrep.namePoolPath = namePoolPath
     }
 }

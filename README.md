@@ -501,6 +501,30 @@ continues.
 It is off in the sense that nothing starts until you open the sheet, tick the
 “I understand” box, and press **Start cycle**.
 
+## Appearing offline
+
+Settings → **Keep accounts showing as offline in chat**, and the same switch in Quick prep
+and the account cycle.
+
+It sets the client's own chat presence to offline — `PUT /lol-chat/v1/me` with
+`availability: offline`, the same write the status menu in the client makes — and then
+puts it back whenever it drifts, because Riot resets presence on its own when you enter a
+lobby or a game. The watcher re-asserts it on each poll, so it survives that.
+
+### What this is not
+
+It is **not** a chat proxy like [Deceive](https://github.com/molenzwiebel/Deceive). Deceive
+stands a local TLS server in front of Riot's chat and rewrites the presence stanzas going
+over it, so the client never gets to announce you at all. This is the client's own offline
+switch, driven through its API. That means:
+
+- League still connects to Riot's chat normally; it just reports you as offline.
+- Riot can reset it, which is why it is re-asserted rather than set once.
+- Anyone already in a lobby or game with you still sees you there.
+
+Which is enough for staying off friends' lists, and needs no proxy, no certificate, and
+nothing sitting in front of the client's traffic.
+
 ## Refreshing by itself
 
 Settings → **Refresh by itself**, on by default.

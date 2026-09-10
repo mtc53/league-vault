@@ -978,6 +978,9 @@ enum LCU {
         var friendsRemoved: Int?
         var friendsFailed: Int?
         var rename: AutoRename.Outcome?
+        /// What presence ended up as, when quick prep was asked to set it.
+        var availability: ChatAvailability?
+        var availabilityWanted: ChatAvailability?
     }
 
     /// Sets the profile icon, clears the challenge badges, and optionally removes every
@@ -988,6 +991,7 @@ enum LCU {
                              clearChallenges: Bool,
                              removeFriends: Bool,
                              renameFrom poolURL: URL? = nil,
+                             availability: ChatAvailability? = nil,
                              stage: ((String) -> Void)? = nil) async -> QuickPrepOutcome {
         var outcome = QuickPrepOutcome()
 
@@ -1026,6 +1030,13 @@ enum LCU {
             }
             outcome.friendsRemoved = result.removed
             outcome.friendsFailed = result.failed
+        }
+
+        // Presence last: the writes above can nudge the client back online.
+        if let availability {
+            stage?("Setting chat to \(availability.display.lowercased())…")
+            outcome.availabilityWanted = availability
+            outcome.availability = await applyChatAvailability(availability, credentials: credentials)
         }
         return outcome
     }
@@ -1084,6 +1095,70 @@ enum LCU {
         var name: String
         var note: String
     }
+
+    // MARK: Chat presence
+
+    /// What your friends list shows you as.
+    ///
+    /// This is the client's own presence, set the same way the chat status menu sets it.
+    /// It is not a chat proxy: the client still connects to Riot normally, it just reports
+    /// itself as offline. Riot can and does reset it — entering a lobby or a game is the
+    /// usual trigger — so anything relying on it has to re-assert it.
+    enum ChatAvailability: String, CaseIterable, Identifiable {
+        case chat      = "chat"
+        case away      = "away"
+        case dnd       = "dnd"
+        case offline   = "offline"
+
+        var id: String { rawValue }
+
+        var display: String {
+            switch self {
+            case .chat:    return "Online"
+            case .away:    return "Away"
+            case .dnd:     return "Busy"
+            case .offline: return "Appear offline"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .chat:    return "circle.fill"
+            case .away:    return "moon.fill"
+            case .dnd:     return "minus.circle.fill"
+            case .offline: return "circle.slash"
+            }
+        }
+    }
+
+    /// GET /lol-chat/v1/me — what the client currently reports.
+    static func chatAvailability(credentials: LCUCredentials) async -> ChatAvailability? {
+        struct DTO: Decodable { let availability: String? }
+        guard let data = try? await request("GET", "/lol-chat/v1/me", credentials: credentials),
+              let dto = try? JSONDecoder().decode(DTO.self, from: data),
+              let raw = dto.availability else { return nil }
+        return ChatAvailability(rawValue: raw)
+    }
+
+    /// PUT /lol-chat/v1/me — the same write the client's own status menu makes.
+    static func setChatAvailability(_ availability: ChatAvailability,
+                                    credentials: LCUCredentials) async throws {
+        _ = try await request("PUT", "/lol-chat/v1/me",
+                              body: ["availability": availability.rawValue],
+                              credentials: credentials)
+    }
+
+    /// Sets presence and confirms it stuck, since the client accepts the write and then
+    /// sometimes reports something else. Returns what it actually ended up as.
+    @discardableResult
+    static func applyChatAvailability(_ wanted: ChatAvailability,
+                                      credentials: LCUCredentials) async -> ChatAvailability? {
+        try? await setChatAvailability(wanted, credentials: credentials)
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        return await chatAvailability(credentials: credentials)
+    }
+
+    // MARK: Friends
 
     /// GET /lol-chat/v1/friends
     static func friends(credentials: LCUCredentials) async -> [Friend] {

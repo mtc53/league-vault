@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var includePasswordsInExport = false
     @State private var testing = false
     @State private var testOK: Bool?
+    @State private var appearOffline = QuickPrep.appearsOffline
     @State private var serverMessage: String?
     @State private var serverIsError = false
 
@@ -295,6 +296,23 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Divider().padding(.vertical, 2)
+
+            Toggle("Keep accounts showing as offline in chat", isOn: $appearOffline)
+                .toggleStyle(.checkbox)
+                .onChange(of: appearOffline) { _, v in QuickPrep.appearsOffline = v }
+            Text("Sets the client's own chat status to offline and puts it back whenever Riot resets it — which it does on entering a lobby or a game. It is the same switch the client's status menu offers, not a chat proxy: League still connects to Riot normally, it just reports you as offline. Someone already in a lobby with you can still see you there.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if appearOffline, let restored = watcher.lastOfflineRestore {
+                Text("Last put back to offline \(restored.relativeDisplay).")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Divider().padding(.vertical, 2)
 
             Text("An entry added with only a login adopts whoever signs in, as long as it is the only one waiting. With two of them waiting League Vault will not guess — refresh one by hand to link it.")
                 .font(.system(size: 10))

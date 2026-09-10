@@ -277,8 +277,8 @@ final class CycleRunner: ObservableObject {
         let summonerName = try await refreshInto(account: account, credentials: credentials)
         setName(index, summonerName)
 
-        // 6. Quick prep — rename, icon and challenge reset, never friends.
-        if setIcon || clearChallenges || QuickPrep.renames {
+        // 6. Quick prep — rename, icon, challenge reset and presence, never friends.
+        if setIcon || clearChallenges || QuickPrep.renames || QuickPrep.appearsOffline {
             set(index, .quickPrep, "")
             let renamed = await runQuickPrep(credentials: credentials, iconId: iconId,
                                              setIcon: setIcon, clearChallenges: clearChallenges,
@@ -604,7 +604,8 @@ final class CycleRunner: ObservableObject {
                                              setIcon: setIcon, iconId: iconId,
                                              clearChallenges: clearChallenges,
                                              removeFriends: false,   // never, by design
-                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil) { [weak self] text in
+                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil,
+                                             availability: QuickPrep.appearsOffline ? .offline : nil) { [weak self] text in
             // Live, because a rename now takes several seconds per attempt. The callback
             // arrives off the main actor, so hop before touching the published log.
             Task { @MainActor in self?.note("\(name): \(text)") }
@@ -633,6 +634,12 @@ final class CycleRunner: ObservableObject {
             note(reset.allSucceeded
                  ? "\(name): challenge badges cleared."
                  : "\(name): challenge reset was partly refused.")
+        }
+        if let wanted = outcome.availabilityWanted {
+            let actual = outcome.availability
+            note(actual == wanted
+                 ? "\(name): chat set to \(wanted.display.lowercased())."
+                 : "\(name): chat would not stay \(wanted.display.lowercased()) — it is \(actual?.display.lowercased() ?? "unknown").")
         }
         return outcome.rename?.didRename ?? false
     }

@@ -44,7 +44,8 @@ final class ClientModel: ObservableObject {
     }
 
     /// Icon, challenge reset, and optionally friends — in one pass.
-    func runQuickPrep(setIcon: Bool, iconId: Int, clearChallenges: Bool, removeFriends: Bool) async -> [String] {
+    func runQuickPrep(setIcon: Bool, iconId: Int, clearChallenges: Bool,
+                      removeFriends: Bool, appearOffline: Bool) async -> [String] {
         guard let credentials else { return ["Not connected to the client."] }
         busy = true
         defer { busy = false; friendProgress = nil }
@@ -53,7 +54,8 @@ final class ClientModel: ObservableObject {
                                              setIcon: setIcon, iconId: iconId,
                                              clearChallenges: clearChallenges,
                                              removeFriends: removeFriends,
-                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil) { text in
+                                             renameFrom: QuickPrep.renames ? QuickPrep.namePoolURL : nil,
+                                             availability: appearOffline ? .offline : nil) { text in
             self.friendProgress = text
         }
 
@@ -90,6 +92,11 @@ final class ClientModel: ObservableObject {
             }
         }
 
+        if let wanted = outcome.availabilityWanted {
+            report.append(outcome.availability == wanted
+                ? "Chat set to \(wanted.display.lowercased())."
+                : "Chat would not stay \(wanted.display.lowercased()) — it is \(outcome.availability?.display.lowercased() ?? "unknown").")
+        }
         if let removed = outcome.friendsRemoved {
             let failed = outcome.friendsFailed ?? 0
             report.append(failed == 0
@@ -148,6 +155,7 @@ struct ClientSheet: View {
     @State private var prepClearChallenges = QuickPrep.clearsChallenges
     @State private var prepRemoveFriends = QuickPrep.removesFriends
     @State private var prepRenames = QuickPrep.renames
+    @State private var prepOffline = QuickPrep.appearsOffline
     @State private var confirmPrep = false
     @State private var prepReport: [String] = []
     @State private var scanning = false
@@ -541,6 +549,7 @@ struct ClientSheet: View {
                          : "set the profile icon to \(prepIconId), falling back through the rest of the chain")
         }
         if prepRenames && QuickPrep.namePoolURL != nil { steps.append("rename it from the name list") }
+        if prepOffline { steps.append("set chat to appear offline") }
         if prepClearChallenges { steps.append("clear the challenge badges, title and banner") }
         if prepRemoveFriends { steps.append("remove all \(model.friends.count) friends — permanently") }
         return steps
@@ -588,6 +597,15 @@ struct ClientSheet: View {
                             .foregroundStyle(.tertiary)
                     } else if prepRenames, let left = QuickPrep.namesRemaining {
                         Text("\(left) name\(left == 1 ? "" : "s") left; the one used is deleted from the file. Two refusals and the Riot ID is left alone.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Toggle("Appear offline in chat", isOn: $prepOffline)
+                        .toggleStyle(.checkbox)
+                    if prepOffline {
+                        Text("Sets the client's own chat status to offline, and puts it back whenever Riot resets it — which it does on entering a lobby or a game.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -644,6 +662,7 @@ struct ClientSheet: View {
         .onChange(of: prepClearChallenges) { _, v in QuickPrep.clearsChallenges = v }
         .onChange(of: prepRemoveFriends) { _, v in QuickPrep.removesFriends = v }
         .onChange(of: prepRenames) { _, v in QuickPrep.renames = v }
+        .onChange(of: prepOffline) { _, v in QuickPrep.appearsOffline = v }
         .alert("Run quick prep on \(model.summoner?.riotID ?? "this account")?", isPresented: $confirmPrep) {
             Button("Cancel", role: .cancel) { }
             Button(prepRemoveFriends ? "Run — removes friends" : "Run",
@@ -652,7 +671,8 @@ struct ClientSheet: View {
                     prepReport = await model.runQuickPrep(setIcon: prepSetIcon,
                                                           iconId: prepIconId,
                                                           clearChallenges: prepClearChallenges,
-                                                          removeFriends: prepRemoveFriends)
+                                                          removeFriends: prepRemoveFriends,
+                                                          appearOffline: prepOffline)
                 }
             }
         } message: {

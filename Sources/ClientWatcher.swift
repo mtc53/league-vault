@@ -23,6 +23,8 @@ final class ClientWatcher: ObservableObject {
     @Published private(set) var isClientRunning = false
     @Published private(set) var signedInAs: String?
     @Published private(set) var lastHandled: Date?
+    /// When presence was last put back to offline, for the settings line.
+    @Published private(set) var lastOfflineRestore: Date?
     @Published private(set) var status = "Not watching."
 
     struct SignIn: Identifiable, Equatable {
@@ -127,6 +129,17 @@ final class ClientWatcher: ObservableObject {
         }
 
         signedInAs = me.riotID
+
+        // Riot puts presence back to online on its own — entering a lobby or a game does
+        // it — so while "appear offline" is on, put it back whenever it drifts.
+        if QuickPrep.appearsOffline {
+            let now = await LCU.chatAvailability(credentials: credentials)
+            if now != nil && now != .offline {
+                _ = await LCU.applyChatAvailability(.offline, credentials: credentials)
+                lastOfflineRestore = Date()
+            }
+        }
+
         guard me.puuid != handledPuuid else {
             status = "Watching \(me.riotID)."
             return Pace.settled
