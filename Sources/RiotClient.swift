@@ -26,7 +26,29 @@ enum RiotClient {
     }()
 
     static let appPath = "/Applications/Riot Client.app"
-    static let servicesBinary = appPath + "/Contents/MacOS/RiotClientServices"
+
+    /// Where Riot itself records the launcher. On this Mac /Applications/Riot Client.app
+    /// is only a symlink to /Users/Shared/Riot Games, and a setup without that symlink
+    /// would leave the hardcoded path pointing at nothing — so the install record wins
+    /// when it can be read.
+    static var servicesBinary: String {
+        if let recorded = recordedLauncherPath() { return recorded }
+        return appPath + "/Contents/MacOS/RiotClientServices"
+    }
+
+    private static func recordedLauncherPath() -> String? {
+        let installs = "/Users/Shared/Riot Games/RiotClientInstalls.json"
+        guard let data = FileManager.default.contents(atPath: installs),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        for key in ["rc_live", "rc_default"] {
+            if let path = object[key] as? String,
+               FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        return nil
+    }
 
     private static var lockfilePath: String {
         NSHomeDirectory() + "/Library/Application Support/Riot Games/Riot Client/Config/lockfile"

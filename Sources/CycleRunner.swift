@@ -53,6 +53,9 @@ final class CycleRunner: ObservableObject {
         /// How long the League client may answer without ever producing an account before
         /// it is judged to have opened blank. Timed from its first reply, not from launch.
         static let leagueUsable: TimeInterval = 15
+        /// How long to give the Riot Client to act on a launch request before falling
+        /// back to clicking its buttons.
+        static let directLaunch: TimeInterval = 25
     }
 
     /// How many times League is reopened when its client keeps coming up blank.
@@ -454,30 +457,39 @@ final class CycleRunner: ObservableObject {
         set(nil, .launchingLeague, "Letting the client finish loading")
         try? await sleep(Timeout.afterSignIn)
 
-        guard let pid = RiotClient.launcherPID else {
-            RiotClient.launchLeague(); return
+        // Ask the Riot Client to launch League by name. This says which product to start,
+        // so it cannot land on the Classic page, and it needs no button to be found —
+        // which matters because the client does not label its sidebar icons, and on the
+        // Classic page it does not label Play either.
+        note("[\(label)] asking the Riot Client to launch League…")
+        set(nil, .launchingLeague, "Asking the client to launch League")
+        RiotClient.launchLeague()
+        if await waitUntil(timeout: Timeout.directLaunch, { LCU.discover() != nil }) {
+            note("[\(label)] League is starting.")
+            return
         }
 
-        // The sidebar and Play clicks below are real mouse events at real screen positions,
-        // so the Riot Client has to be the window on top or they land on whatever is
-        // covering it. League Vault is frontmost by this point — it comes back after
-        // typing — and after League is closed for a reopen there is nothing else to raise
-        // the client, which is when this bites.
+        // Only if that is ignored, drive the window instead.
+        guard let pid = RiotClient.launcherPID else { return }
+        note("[\(label)] no response to that — trying the client's own buttons.")
+
+        // These are real mouse events at real screen positions, so the Riot Client has to
+        // be the window on top or they land on whatever is covering it.
         if !Autofill.focusRiotClient() {
             note("[\(label)] could not bring the Riot Client forward before clicking Play.")
         }
         try? await sleep(1)
 
-        // The Riot Client sometimes opens on the League Classic page, whose Play launches
-        // the wrong mode. Select the normal League icon in the left sidebar first.
+        // The client sometimes sits on the League Classic page, whose Play starts the
+        // wrong thing. Select the normal League icon first when it can be identified.
         if AXControl.clickLeagueSidebarIcon(pid: pid) {
             note("[\(label)] selected the League tab in the sidebar.")
             try? await sleep(2)
         } else {
-            note("[\(label)] League sidebar icon not found by label — assuming it is already selected.")
+            note("[\(label)] the sidebar icons carry no labels, so the League tab cannot be picked out — if the client is on the Classic page, click League yourself.")
         }
 
-        for attempt in 0..<8 {
+        for attempt in 0..<6 {
             if LCU.discover() != nil {
                 note("[\(label)] League is starting.")
                 return
@@ -494,11 +506,6 @@ final class CycleRunner: ObservableObject {
             // Give the click time to register and League a chance to begin launching
             // before deciding it did not take.
             try? await sleep(6)
-        }
-
-        if LCU.discover() == nil {
-            note("[\(label)] Play did not start League — launching directly.")
-            RiotClient.launchLeague()
         }
     }
 
