@@ -591,6 +591,14 @@ struct Account: Codable, Identifiable, Hashable {
     var recentGames: Int?
     var recentGamesAsOf: Date?
 
+    /// How many times in a row the account cycle has given up on this account. Counted
+    /// across runs, not within one, so two failures on separate nights still flag it.
+    /// A run that gets through resets it.
+    var cycleFailures: Int = 0
+    /// Why it was given up on, most recently.
+    var lastCycleFailure: String = ""
+    var lastCycleFailureAt: Date?
+
     static let recentWindowDays = 90
 
     var puuid: String?
@@ -624,6 +632,9 @@ struct Account: Codable, Identifiable, Hashable {
         honorLevel = try? c.decodeIfPresent(Int.self, forKey: .honorLevel)
         recentGames = try? c.decodeIfPresent(Int.self, forKey: .recentGames)
         recentGamesAsOf = try? c.decodeIfPresent(Date.self, forKey: .recentGamesAsOf)
+        cycleFailures = (try? c.decodeIfPresent(Int.self, forKey: .cycleFailures)).flatMap { $0 } ?? 0
+        lastCycleFailure = (try? c.decodeIfPresent(String.self, forKey: .lastCycleFailure)).flatMap { $0 } ?? ""
+        lastCycleFailureAt = try? c.decodeIfPresent(Date.self, forKey: .lastCycleFailureAt)
         riotPoints = try? c.decodeIfPresent(Int.self, forKey: .riotPoints)
         puuid = try? c.decodeIfPresent(String.self, forKey: .puuid)
         summonerLevel = try? c.decodeIfPresent(Int.self, forKey: .summonerLevel)
@@ -728,6 +739,34 @@ struct Account: Codable, Identifiable, Hashable {
     /// Untouched for three months by anyone. Still worth flagging separately.
     static let dormantDays = 90
     var isDormant: Bool { (daysSinceLastGame ?? Int.max) >= Account.dormantDays }
+
+    /// Failing once can be a captcha or a slow client; twice in a row is worth your
+    /// attention, so that is when the account is flagged.
+    static let flagAfterFailures = 2
+
+    var isFlagged: Bool { cycleFailures >= Account.flagAfterFailures }
+
+    /// What the flag says, for a badge tooltip or the detail pane.
+    var flagDescription: String? {
+        guard isFlagged else { return nil }
+        let when = lastCycleFailureAt.map { " (\($0.relativeDisplay))" } ?? ""
+        let why = lastCycleFailure.isEmpty ? "no reason recorded" : lastCycleFailure
+        return "Failed \(cycleFailures) cycles in a row\(when): \(why)"
+    }
+
+    /// The cycle gave up on this account.
+    mutating func recordCycleFailure(_ reason: String) {
+        cycleFailures += 1
+        lastCycleFailure = reason
+        lastCycleFailureAt = Date()
+    }
+
+    /// The cycle got through, so whatever was wrong is not any more.
+    mutating func clearCycleFailures() {
+        cycleFailures = 0
+        lastCycleFailure = ""
+        lastCycleFailureAt = nil
+    }
 
     var activeQueueDelays: [Penalty] {
         activePenalties.filter { $0.kind == .queueDelay }

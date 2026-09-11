@@ -185,6 +185,7 @@ final class CycleRunner: ObservableObject {
 
             guard let password = store?.password(for: account) else {
                 set(index, .skipped, "No saved password.")
+                recordFailure(account, reason: "Its saved password could not be read.", index: index)
                 continue
             }
 
@@ -193,15 +194,18 @@ final class CycleRunner: ObservableObject {
                                    username: account.loginUsername, password: password,
                                    iconId: iconId, setIcon: setIcon, clearChallenges: clearChallenges)
                 set(index, .done, "")
+                clearFlag(account)
             } catch is CancellationError {
                 break
             } catch let error as StepError {
                 set(index, .failed, error.message)
                 note("\(account.displayName): \(error.message)")
+                recordFailure(account, reason: error.message, index: index)
                 // Best effort: sign this account out before the next one. Never quits.
                 try? await signOutCurrent(label: account.displayName)
             } catch {
                 set(index, .failed, error.localizedDescription)
+                recordFailure(account, reason: error.localizedDescription, index: index)
             }
         }
 
@@ -671,6 +675,32 @@ final class CycleRunner: ObservableObject {
     private func showSelf() {
         NSApplication.shared.unhide(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: Flagging
+
+    /// Counts a failure against the account and, once it has failed twice running, leaves
+    /// a flag on it — so a bad account is still obvious long after this log has gone.
+    private func recordFailure(_ account: Account, reason: String, index: Int) {
+        guard let store, var current = store.accounts.first(where: { $0.id == account.id })
+        else { return }
+        current.recordCycleFailure(reason)
+        store.update(current)
+
+        if current.isFlagged {
+            note("\(current.displayName): flagged — \(current.cycleFailures) cycles in a row have failed.")
+            set(index, .failed, "Flagged after \(current.cycleFailures) failures — \(reason)")
+        }
+    }
+
+    /// A run that got through clears whatever was counted against the account.
+    private func clearFlag(_ account: Account) {
+        guard let store, var current = store.accounts.first(where: { $0.id == account.id }),
+              current.cycleFailures > 0 else { return }
+        let wasFlagged = current.isFlagged
+        current.clearCycleFailures()
+        store.update(current)
+        if wasFlagged { note("\(current.displayName): flag cleared — this run went through.") }
     }
 
     // MARK: Small helpers

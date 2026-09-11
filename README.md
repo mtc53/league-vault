@@ -480,6 +480,17 @@ A live list shows every account and the stage it is at; **Stop** ends the run af
 current step. Each account is independent — one that stalls is marked failed and the
 cycle carries on.
 
+### Accounts it keeps failing on
+
+A single failure is usually a captcha or a slow client, so it is not worth acting on. Two
+in a row is, and that is when the account gets **flagged**: a red flag beside it in the
+sidebar, a banner on the account itself saying how many runs failed and why, and a
+**Flagged** filter in the sidebar that only appears when something is flagged.
+
+The count is kept on the account and survives quitting, so two failures on separate nights
+flag it just as two in one run would. A run that gets through clears it, and the banner has
+a **Clear flag** button for when you have dealt with it yourself.
+
 ### What it cannot promise
 
 Steps 1–3 drive the **Riot Client**, a separate program, through keystrokes and its

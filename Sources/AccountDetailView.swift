@@ -21,6 +21,7 @@ struct AccountDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
+                if account.isFlagged { flagBanner }
                 if account.hasActivePenalty { penaltyBanner }
                 rankCard
                 championsCard
@@ -381,6 +382,35 @@ struct AccountDetailView: View {
                 }
             }
         }
+    }
+
+    /// Raised when the account cycle has given up on this account twice running.
+    private var flagBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "flag.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("The account cycle keeps failing on this one")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(account.flagDescription ?? "")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Clear flag") {
+                guard var updated = store.accounts.first(where: { $0.id == account.id }) else { return }
+                updated.clearCycleFailures()
+                store.update(updated)
+                onNotify("Flag cleared.", false)
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.red.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.red.opacity(0.35), lineWidth: 1))
     }
 
     @ViewBuilder

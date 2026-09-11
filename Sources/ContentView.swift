@@ -31,6 +31,7 @@ struct ContentView: View {
     @State private var championQuery = ""
     @State private var sort: SortOrder = .name
     @State private var penaltiesOnly = false
+    @State private var flaggedOnly = false
     @State private var groupByFolder = true
     @State private var editing: Account?
     @State private var creatingNew = false
@@ -56,6 +57,7 @@ struct ContentView: View {
         var list = store.accounts
 
         if penaltiesOnly { list = list.filter(\.hasActivePenalty) }
+        if flaggedOnly { list = list.filter(\.isFlagged) }
         if let championOnly {
             list = list.filter { account in
                 account.ownedChampions.contains {
@@ -124,6 +126,9 @@ struct ContentView: View {
             .map { (name: $0.key, count: $0.value) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
+
+    /// How many accounts the cycle has given up on twice running.
+    private var flaggedCount: Int { store.accounts.filter(\.isFlagged).count }
 
     /// Every folder that exists across the whole library, for the Move-to menu.
     private var allFolders: [String] {
@@ -302,6 +307,15 @@ struct ContentView: View {
                         Label("Penalties", systemImage: "exclamationmark.triangle")
                     }
                     .toggleStyle(.checkbox)
+
+                    if flaggedCount > 0 {
+                        Toggle(isOn: $flaggedOnly) {
+                            Label("Flagged (\(flaggedCount))", systemImage: "flag.fill")
+                        }
+                        .toggleStyle(.checkbox)
+                        .foregroundStyle(.red)
+                        .help("Accounts the cycle has failed on \(Account.flagAfterFailures) times running")
+                    }
 
                     Toggle("Folders", isOn: $groupByFolder)
                         .toggleStyle(.checkbox)
@@ -667,6 +681,7 @@ struct ContentView: View {
         search = ""
         championOnly = nil
         penaltiesOnly = false
+        flaggedOnly = false
         selection = match.id
     }
 
@@ -795,6 +810,12 @@ struct AccountRow: View {
                     Text(account.displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
+                    if account.isFlagged {
+                        Image(systemName: "flag.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.red)
+                            .help(account.flagDescription ?? "The account cycle keeps failing on this one.")
+                    }
                     if let worst = account.worstActivePenalty {
                         Image(systemName: worst.kind == .dodgeTimer
                               ? "arrow.uturn.backward.circle.fill"
