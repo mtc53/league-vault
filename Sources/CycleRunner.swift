@@ -79,10 +79,16 @@ final class CycleRunner: ObservableObject {
     }
 
     /// Accounts that can be cycled: a login and a stored password to sign in with.
+    ///
+    /// Deliberately checks that a password *exists* rather than decrypting it. This is read
+    /// from a view body, which SwiftUI re-evaluates freely — decrypting every account there
+    /// pinned the main thread, and with the key fetched lazily it could also raise a
+    /// Keychain prompt mid-render. The decryption happens once, when the cycle actually
+    /// runs; an entry whose password will not open is reported and skipped there.
     func eligibleAccounts() -> [Account] {
         guard let store else { return [] }
         return store.accounts.filter {
-            !$0.loginUsername.isEmpty && store.password(for: $0) != nil
+            !$0.loginUsername.isEmpty && !($0.encryptedPassword ?? "").isEmpty
         }
     }
 
