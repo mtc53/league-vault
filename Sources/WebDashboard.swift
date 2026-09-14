@@ -298,6 +298,9 @@ final class WebDashboard: ObservableObject {
     @Published var isLocked: Bool { didSet { defaults.set(isLocked, forKey: Keys.locked) } }
     /// Login names are only ever published behind the lock.
     @Published var includeLogins: Bool { didSet { defaults.set(includeLogins, forKey: Keys.logins) } }
+    /// Upload once when an account cycle finishes, whatever the background setting says —
+    /// a run exists to bring everything up to date, so it should end on the site.
+    @Published var publishAfterCycle: Bool { didSet { defaults.set(publishAfterCycle, forKey: Keys.afterCycle) } }
 
     @Published private(set) var lastPublish: Date?
     @Published private(set) var lastError: String?
@@ -307,7 +310,7 @@ final class WebDashboard: ObservableObject {
     private enum Keys {
         static let enabled = "webEnabled", path = "webPath", url = "webURL"
         static let title = "webTitle", locked = "webLocked", logins = "webLogins"
-        static let last = "webLastPublish"
+        static let last = "webLastPublish", afterCycle = "webPublishAfterCycle"
     }
 
     private let defaults = UserDefaults.standard
@@ -323,6 +326,7 @@ final class WebDashboard: ObservableObject {
         // Locked by default: the page is going onto an address anyone can reach.
         isLocked = defaults.object(forKey: Keys.locked) as? Bool ?? true
         includeLogins = defaults.bool(forKey: Keys.logins)
+        publishAfterCycle = defaults.object(forKey: Keys.afterCycle) as? Bool ?? true
         lastPublish = defaults.object(forKey: Keys.last) as? Date
     }
 

@@ -707,6 +707,26 @@ Finally, in League Vault → Settings → Publish a web dashboard:
 `~/Library/Application Support/LeagueVault/web/index.html` and opens it, with no server
 involved — worth doing first to see what you are about to publish.
 
+### Publishing to lol.myprojects.cc
+
+The server bundle at [mtc53/myprojects-site](https://github.com/mtc53/myprojects-site) runs
+Caddy and serves its `lol\` folder at **lol.myprojects.cc/vault/**, with a wrapper page at
+the root that frames it. League Vault publishes the same single `index.html` into that
+folder, so nothing about the format changes — only where it goes:
+
+- **Folder the web server serves** — the bundle's `lol` folder, e.g. `C:\my projects site\lol`
+- **Address to open** — `https://lol.myprojects.cc`
+
+Caddy puts the whole site behind its own password (`basic_auth` in the Caddyfile), which is
+worth knowing if the page's own passphrase lock is off: the vault page is then plain on
+disk and it is Caddy's password doing the work.
+
+### After a cycle
+
+**Upload everything to the site**, in the Cycle Accounts sheet and on by default, publishes
+the whole vault once the last account is done — whether or not the background republish is
+switched on. A run exists to bring everything up to date, so it ends on the site.
+
 ### Keeping it current
 
 **Republish whenever the vault changes** publishes 30 seconds after any change, so a

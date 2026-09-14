@@ -5,6 +5,7 @@ import AppKit
 struct CycleSheet: View {
     @EnvironmentObject var store: AccountStore
     @EnvironmentObject var runner: CycleRunner
+    @EnvironmentObject var web: WebDashboard
     @Environment(\.dismiss) private var dismiss
 
     @State private var setIcon = QuickPrep.setsIcon
@@ -75,7 +76,7 @@ struct CycleSheet: View {
                     step(2, "Type the login and submit", "Synthetic keystrokes into the Riot Client, then Return.")
                     step(3, "Launch League and refresh", "Rank, last game, champions, wallet, penalties.")
                     step(4, "Quick prep", "Rename, icon, challenge reset, appear offline — never friends.")
-                    step(5, "Publish and go to the next", "If the web dashboard is on.")
+                    step(5, "Publish and go to the next", "The whole vault is uploaded again at the end.")
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -113,6 +114,24 @@ struct CycleSheet: View {
                     Label("Friends are never removed by the cycle.", systemImage: "person.2")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                }
+
+                FormSection("When the run finishes") {
+                    Toggle("Upload everything to the site", isOn: $web.publishAfterCycle)
+                        .toggleStyle(.checkbox)
+                    if web.publishAfterCycle {
+                        if web.isConfigured {
+                            Text("Publishes the whole vault to \(web.siteURL.isEmpty ? web.resolvedWindowsPath : web.siteURL) once the last account is done, whether or not the background republish is on.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text("The server is not set up yet — fill it in under Settings → Your server, and the folder under Publish a web dashboard.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
 
                 warningBox

@@ -217,6 +217,10 @@ final class CycleRunner: ObservableObject {
             set(nil, .signingOut, "")
             try? await signOutCurrent(label: "cleanup")
         }
+
+        // Then put the whole vault on the site. A run exists to bring everything up to
+        // date, so it ends there whether or not the background republish is switched on.
+        await publishEverything()
         finish(interrupted: Task.isCancelled)
         if !Task.isCancelled { note("Cycle complete.") }
     }
@@ -682,6 +686,23 @@ final class CycleRunner: ObservableObject {
     private func showSelf() {
         NSApplication.shared.unhide(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    /// The upload that closes a run.
+    private func publishEverything() async {
+        guard let web, web.publishAfterCycle else { return }
+        guard web.isConfigured else {
+            note("Not uploading: the server or the page passphrase is not set up yet.")
+            return
+        }
+        set(nil, .publishing, "Uploading to the site")
+        let where_ = web.siteURL.isEmpty ? "the site" : web.siteURL
+        note("Uploading all \(store?.accounts.count ?? 0) accounts to \(where_)…")
+        if await web.publish(reason: "cycle finished") {
+            note("Uploaded to \(web.resolvedWindowsPath)\\index.html.")
+        } else {
+            note("Upload failed: \(web.lastError ?? "no reason given").")
+        }
     }
 
     // MARK: Flagging

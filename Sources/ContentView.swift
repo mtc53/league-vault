@@ -185,6 +185,7 @@ struct ContentView: View {
             CycleSheet()
                 .environmentObject(store)
                 .environmentObject(cycle)
+                .environmentObject(web)
         }
         .sheet(item: $newFolderTarget) { account in
             NameFolderSheet(title: "New Folder", initial: "") { name in
