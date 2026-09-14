@@ -51,8 +51,6 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Divider()
-
                     FormSection("Data") {
                         Text("Accounts live in \(AccountStore.directory.path)/accounts.json — passwords in that file are encrypted.")
                             .font(.system(size: 11))
@@ -80,28 +78,21 @@ struct SettingsView: View {
                         }
                     }
 
-                    Divider()
-
                     watcherSection
-
-                    Divider()
 
                     serverSection
 
-                    Divider()
-
                     webSection
-
-                    Divider()
 
                     FormSection("Cache") {
                         HStack(spacing: 10) {
-                            Button("Clear profile icon cache") {
+                            Button("Clear icon and art cache") {
                                 ProfileIconCache.shared.clearDiskCache()
+                                ChampionArt.shared.clearDiskCache()
                             }
                             Spacer()
                         }
-                        Text("Profile icons are cached under ~/Library/Caches/LeagueVault. They redownload on the next refresh.")
+                        Text("Profile icons and the champion splash art behind each card are cached under ~/Library/Caches/LeagueVault. They redownload on the next refresh.")
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -123,6 +114,8 @@ struct SettingsView: View {
             .padding(.vertical, 14)
         }
         .frame(width: 640)
+        .background(LV.bg2)
+        .tint(LV.accent)
     }
 
     // MARK: Web dashboard

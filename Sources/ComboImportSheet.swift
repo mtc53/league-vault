@@ -118,6 +118,8 @@ struct ComboImportSheet: View {
         }
         .padding(22)
         .frame(width: 520)
+        .background(LV.bg2)
+        .tint(LV.accent)
     }
 
     @ViewBuilder
@@ -145,7 +147,7 @@ struct ComboImportSheet: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(LV.panel))
     }
 
     private func row(_ number: String, _ text: String, color: Color) -> some View {

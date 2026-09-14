@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// hides League Vault while it types, and that must not be mistaken for putting it
     /// away.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The window and every sheet in it are drawn on the vault's own near-black
+        // palette, so the system chrome is pinned dark rather than following the Mac's
+        // light mode into an unreadable half-and-half.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { note in

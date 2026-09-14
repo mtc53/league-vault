@@ -116,6 +116,8 @@ struct AccountEditor: View {
             .padding(.vertical, 14)
         }
         .frame(width: 620)
+        .background(LV.bg2)
+        .tint(LV.accent)
         .onAppear(perform: loadPassword)
     }
 
@@ -148,7 +150,7 @@ struct AccountEditor: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "wand.and.stars")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(LV.accent)
                 Text("That is all that is needed. Sign in to this account in the League client and press Refresh — the Riot ID, server, rank, last game, champions, wallet and any penalties fill themselves in, and the nickname takes the account's name.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -156,7 +158,7 @@ struct AccountEditor: View {
                 Spacer()
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: 7).fill(LV.accent.opacity(0.08)))
 
             Text("Everything else stays editable afterwards from Edit.")
                 .font(.system(size: 10))
@@ -268,7 +270,7 @@ struct AccountEditor: View {
                     .padding(4)
                     .overlay(
                         RoundedRectangle(cornerRadius: 5)
-                            .strokeBorder(Color.primary.opacity(0.15))
+                            .strokeBorder(LV.line)
                     )
             }
         }
@@ -462,7 +464,7 @@ struct AccountEditor: View {
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
+                        .fill(LV.panel)
                 )
             }
         }
@@ -519,13 +521,12 @@ struct FormSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .kerning(0.5)
+            Text(title).sectionLabel()
             content
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panel(radius: 11)
     }
 }
 
@@ -541,8 +542,10 @@ struct Field<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 9.5, weight: .bold))
+                .kerning(1.1)
+                .textCase(.uppercase)
+                .foregroundStyle(LV.dim)
             content
                 .textFieldStyle(.roundedBorder)
         }

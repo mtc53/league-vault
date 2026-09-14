@@ -32,6 +32,8 @@ struct IconPickerSheet: View {
             footer
         }
         .frame(width: 660, height: 560)
+        .background(LV.bg2)
+        .tint(LV.accent)
         .task {
             await cache.loadCatalog()
             loading = false
@@ -60,7 +62,7 @@ struct IconPickerSheet: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: 6).fill(LV.panel))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -102,11 +104,11 @@ struct IconPickerSheet: View {
             ProfileIconView(iconId: id, initials: "\(id)", tint: .secondary, size: 56, corner: 8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(selected == id ? Color.accentColor : .clear, lineWidth: 3)
+                        .strokeBorder(selected == id ? LV.accent : .clear, lineWidth: 3)
                 )
             Text("\(id)")
                 .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(selected == id ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(selected == id ? AnyShapeStyle(LV.accent) : AnyShapeStyle(.tertiary))
         }
         .contentShape(Rectangle())
         .onTapGesture { selected = id }
@@ -123,7 +125,7 @@ struct IconPickerSheet: View {
             }
             HStack(spacing: 12) {
                 if let selected {
-                    ProfileIconView(iconId: selected, initials: "?", tint: .accentColor, size: 34, corner: 7)
+                    ProfileIconView(iconId: selected, initials: "?", tint: LV.accent, size: 34, corner: 7)
                     Text("Icon \(selected)")
                         .font(.system(size: 12, weight: .medium))
                 } else {

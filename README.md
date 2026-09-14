@@ -10,6 +10,34 @@ and only when you press Refresh.
 
 The built app is at `/Applications/League Vault.app`.
 
+## The window
+
+The window is laid out like the dashboard it publishes, so the two read the same way:
+
+- **Top bar** — the vault's name, the actions (jump to the signed-in account, refresh
+  everything, the League client sheet, the account cycle, settings, add), and a stamp
+  saying how many accounts there are and when the site was last published. The system
+  title bar is hidden; the traffic lights sit on this bar.
+- **Hero** — the vault counted up: accounts, how many are ranked, champions owned,
+  blue essence, RP, how many have sat idle 90 days, how many carry a penalty, and how
+  many the cycle has flagged.
+- **Controls** — one search box covering names, logins, folders, notes and champions;
+  a grid/list toggle; a folder-grouping toggle; a sort; and eight filters (folder,
+  server, rank, FA/NFA, status, last played, who played it, champion). Whatever is
+  filtering shows as a chip you can clear, with **Clear all** beside them.
+- **Results** — accounts as cards fronted by champion splash art, or as a dense table.
+  Clicking one opens the detail sheet.
+
+The palette is the stylesheet's, transcribed into `Sources/Theme.swift` — change a
+colour in `Resources/dashboard.html` and change it there too. The app runs dark
+regardless of the Mac's appearance, because every surface in it is drawn on that
+near-black ground.
+
+The splash art behind each card is the champion of the last game, or a stable pick out
+of the account's pool so a card keeps the same face between refreshes — the same rule
+the page uses. It comes from Riot's public CDNs and is cached under
+`~/Library/Caches/LeagueVault`; with no network the cards fall back to a flat gradient.
+
 ## Rebuilding after you change the code
 
 ```
@@ -73,8 +101,8 @@ the client and is refreshed.
 ## Idle time
 
 Every account carries one number: **how many days since the last game anyone played on
-it.** It is on the sidebar row, on the detail header, on the web dashboard's cards and
-list, and it is a sort option (**Days idle**) in both.
+it.** It is on every card and table row, on the detail sheet's pill strip, on the web
+dashboard's cards and list, and it is a sort option (**Longest idle**) in both.
 
 The number comes from the last game the client reported, so it only moves when the
 account is refreshed. An account with no game on record shows a dashed **never played**
@@ -103,33 +131,35 @@ and its **Longest idle** headline leaves out the games you played yourself.
 ## Folders
 
 Each account can be filed under a folder (Main, Smurfs, Duo accounts — whatever you
-like). The sidebar groups by folder with an **Unfiled** section last; the *Folders*
-checkbox at the bottom turns grouping off for one flat list.
+like). The **folder button** beside the grid/list toggle groups the results under folder
+headings, with an **Unfiled** section last; off, they are one flat run.
 
-- **Drag a row onto a folder header** to move it there. The header shows a dashed
-  highlight as you hover, and the account stays selected after the drop.
-- Or set a folder in the editor's **Account** tab, or right-click a row → **Move to**.
-- Right-click a folder header to **Rename** it (updates every account in it) or
+- **Drag a card or row onto a folder heading** to move it there. The heading shows a
+  dashed highlight as you hover.
+- Or set a folder in the editor's **Account** tab, or right-click an account → **Move to**.
+- Right-click a folder heading to **Rename** it (updates every account in it) or
   **Empty** it (unfiles them; no account is deleted).
+- Or narrow to one folder with the **folder filter**, without grouping anything.
 
-Dragging onto the **Unfiled** header removes an account from its folder.
+Dragging onto the **Unfiled** heading removes an account from its folder.
 
 Folders exist wherever an account references them — there is no separate folder list
 to keep in sync, so removing the last account from a folder makes the folder go away.
 
 ## Champions
 
-Refresh pulls the account's owned-champion list from the client. The detail pane shows
-the count, a filter box, and the names as a grid (first 24, with a *Show all*).
+Refresh pulls the account's owned-champion list from the client. The detail sheet shows
+the count, a filter box, and the champions as portrait chips (first 24, with a
+*Show all*); anything the filter matched is picked out in the accent colour.
 
-To find which accounts own a champion, click **Champion** at the bottom of the sidebar.
+To find which accounts own a champion, use the **champion filter** in the controls.
 The picker lists every champion across the whole vault with the number of accounts that
-own it; pick one and the sidebar narrows to those accounts, with a chip showing the
+own it; pick one and the results narrow to those accounts, with a chip showing the
 active filter until you clear it.
 
 The filter matches the champion exactly, so filtering on **Vi** does not drag in Viktor
 accounts — while the picker's own search box is a substring, so typing `vi` still finds
-Viktor. The sidebar search scope also has a **Champion** mode for typing a name directly.
+Viktor. The main search box also matches champion names, so typing one there works too.
 
 Only accounts you have refreshed at least once have a champion list.
 
@@ -283,7 +313,7 @@ is upward: if the live rank is *above* the recorded peak, the peak is raised to 
 because it plainly is the new peak. Your note is kept either way, and the editor can
 still correct a peak in any direction.
 
-Peak rank is what an unranked account shows in the sidebar — `Unranked · peak Diamond II`
+Peak rank is what an unranked account shows — `Unranked · peak Diamond II`
 — tinted with the peak's colour instead of grey. Sorting by Rank puts unranked accounts
 below every ranked one, but orders them among themselves by peak.
 
@@ -297,8 +327,8 @@ Each account records whether you hold its original registration email:
   can be recalled and cannot be fully secured.
 - **Not recorded** — the default.
 
-Set it in the editor's **Account** tab. It shows as a green/orange badge in the sidebar
-and a chip in the header, with the full explanation in the Login card.
+Set it in the editor's **Account** tab. It shows as a green/orange pill on the card, the
+table row and the detail sheet, with the full explanation in the Login card.
 
 Searching `fa` or `nfa` matches on this field — as whole words, so an account called
 "Fabio" is not treated as FA. (Name matches still apply, so searching `fa` returns both
@@ -380,12 +410,12 @@ reads the client's own API catalogue, filters for honor / behaviour / restrictio
 with data, which answered empty, and whether `/help` worked at all.
 
 **Manual records are never clobbered.** A refresh replaces only penalties tagged
-`client`; anything you typed stays put. Either kind drives the sidebar warning
-badge and the **Penalties only** filter.
+`client`; anything you typed stays put. Either kind drives the warning badge and the
+**status** filter.
 
 ## Renaming an account
 
-The **League Client** button in the toolbar opens a sheet that:
+The **League Client** button in the top bar opens a sheet that:
 
 - finds the running client (`LeagueClientUx`) and reads `--app-port` and
   `--remoting-auth-token` from its command line, authenticating as `riot:<token>`;
@@ -464,7 +494,7 @@ session starts in, which is `C:\Users\<you>`.
 
 ## Cycling every account
 
-The **Cycle Accounts** toolbar button signs into each account that has a saved login and
+The **Cycle Accounts** button in the top bar signs into each account that has a saved login and
 password, one after another, and for each does the whole round trip unattended:
 
 1. **Signs out** whatever is signed in — through the Riot Client's own logout. The Riot
@@ -483,9 +513,9 @@ cycle carries on.
 ### Accounts it keeps failing on
 
 A single failure is usually a captcha or a slow client, so it is not worth acting on. Two
-in a row is, and that is when the account gets **flagged**: a red flag beside it in the
-sidebar, a banner on the account itself saying how many runs failed and why, and a
-**Flagged** filter in the sidebar that only appears when something is flagged.
+in a row is, and that is when the account gets **flagged**: a red flag on its card and
+row, a banner on the account itself saying how many runs failed and why, a **Flagged**
+figure in the hero, and **Flagged by the cycle** in the status filter.
 
 The count is kept on the account and survives quitting, so two failures on separate nights
 flag it just as two in one run would. A run that gets through clears it, and the banner has
@@ -565,10 +595,10 @@ window comes up either way, and the prompt only appears when it is really needed
 
 ## The signed-in account
 
-**Signed-in Account** in the toolbar (⌘L), and **Go to &lt;account&gt;** in the menu bar, jump
-straight to whichever account the League client is signed in to — matched by identity
-first, then Riot ID — instead of hunting for it in the sidebar. It clears the search and
-any champion or penalty filter first, so the account cannot be selected but hidden.
+The **signed-in account** button in the top bar (⌘L), and **Go to &lt;account&gt;** in the menu
+bar, open whichever account the League client is signed in to — matched by identity first,
+then Riot ID — instead of hunting for it. It clears every filter first, so the account
+cannot be opened-but-hidden.
 
 ## Refreshing by itself
 

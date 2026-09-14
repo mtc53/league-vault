@@ -69,6 +69,8 @@ struct SignInHelperSheet: View {
             .padding(.vertical, 14)
         }
         .frame(width: 520)
+        .background(LV.bg2)
+        .tint(LV.accent)
         .onAppear {
             clientRunning = riotClient != nil
             permitted = Autofill.isPermitted
@@ -186,7 +188,7 @@ struct SignInHelperSheet: View {
                 if countdown > 0 {
                     Text("Switching to the Riot Client — click the username field now.")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(LV.accent)
                 }
 
                 if !permitted {
@@ -378,7 +380,7 @@ struct SignInHelperSheet: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 20, height: 20)
-                .background(Circle().fill(doneThrough(number) ? Color.green : Color.accentColor))
+                .background(Circle().fill(doneThrough(number) ? Color.green : LV.accent))
             VStack(alignment: .leading, spacing: 8) {
                 Text(title).font(.system(size: 13, weight: .medium))
                 content()

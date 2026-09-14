@@ -33,6 +33,8 @@ struct CycleSheet: View {
             footer
         }
         .frame(width: 560, height: 620)
+        .background(LV.bg2)
+        .tint(LV.accent)
     }
 
     // MARK: Header
@@ -41,7 +43,7 @@ struct CycleSheet: View {
         HStack(spacing: 10) {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(LV.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Cycle all accounts")
                     .font(.system(size: 15, weight: .semibold))
@@ -80,7 +82,7 @@ struct CycleSheet: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(LV.panel))
 
                 FormSection("Quick prep for each account") {
                     Toggle("Set the profile icon", isOn: $setIcon)
@@ -217,9 +219,9 @@ struct CycleSheet: View {
         HStack(alignment: .top, spacing: 10) {
             Text("\(n)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(LV.accent)
                 .frame(width: 16, height: 16)
-                .background(Circle().fill(Color.accentColor.opacity(0.15)))
+                .background(Circle().fill(LV.accent.opacity(0.15)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.system(size: 12, weight: .medium))
                 Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -326,7 +328,7 @@ struct CycleSheet: View {
                         .padding(8)
                     }
                     .frame(height: 120)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.black.opacity(0.20)))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(LV.bg))
                     .onChange(of: runner.log.count) { _, c in
                         withAnimation { proxy.scrollTo(c - 1, anchor: .bottom) }
                     }

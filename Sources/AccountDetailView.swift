@@ -17,23 +17,34 @@ struct AccountDetailView: View {
     @State private var showAllChampions = false
     @State private var showSignIn = false
 
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                if account.isFlagged { flagBanner }
-                if account.hasActivePenalty { penaltyBanner }
-                rankCard
-                championsCard
-                lastGameCard
-                penaltiesCard
-                credentialsCard
-                if !account.notes.isEmpty { notesCard }
-                footer
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    VStack(alignment: .leading, spacing: 14) {
+                        if account.isFlagged { flagBanner }
+                        if account.hasActivePenalty { penaltyBanner }
+                        rankCard
+                        championsCard
+                        lastGameCard
+                        penaltiesCard
+                        credentialsCard
+                        if !account.notes.isEmpty { notesCard }
+                        footer
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                    .padding(.bottom, 24)
+                }
             }
-            .padding(20)
+            actions
         }
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .frame(width: 880, height: 740)
+        .background(LV.bg2)
+        .tint(LV.accent)
         .sheet(isPresented: $showSignIn) {
             SignInHelperSheet(account: account).environmentObject(store)
         }
@@ -46,137 +57,166 @@ struct AccountDetailView: View {
 
     // MARK: Header
 
+    /// The page's sheet head: splash behind the name, the profile icon hanging off the
+    /// bottom edge of it, then a row of pills.
     private var header: some View {
-        HStack(alignment: .top, spacing: 14) {
-            ProfileIconView(iconId: account.profileIconId,
-                            initials: initials,
-                            tint: account.soloRank.tier.color,
-                            size: 60,
-                            corner: 12)
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                SplashArt(championId: account.faceChampionId, height: 176,
+                          fadeTo: LV.bg2, opacity: 0.55)
+                    .overlay(alignment: .topTrailing) {
+                        Button { dismiss() } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.lvIcon)
+                            .keyboardShortcut(.cancelAction)
+                            .padding(12)
+                    }
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(account.displayName)
-                    .font(.system(size: 22, weight: .bold))
-                    .textSelection(.enabled)
+                HStack(alignment: .bottom, spacing: 16) {
+                    ProfileIconView(iconId: account.profileIconId,
+                                    initials: initials,
+                                    tint: account.soloRank.effectiveTier.color,
+                                    size: 78,
+                                    corner: 16)
 
-                HStack(spacing: 6) {
-                    if !account.gameName.isEmpty {
-                        Text(account.riotID)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(account.displayName)
+                            .font(.system(size: 21, weight: .heavy))
+                            .foregroundStyle(LV.text)
                             .textSelection(.enabled)
-                        Button {
-                            Clipboard.copy(account.riotID)
-                            onNotify("Riot ID copied.", false)
-                        } label: {
-                            Image(systemName: "doc.on.doc").font(.system(size: 10))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.tertiary)
-                    }
-                }
 
-                HStack(spacing: 6) {
-                    Chip(text: "\(account.region.display) · \(account.region.longName)", color: .secondary)
-                    if !account.folder.isEmpty {
-                        Chip(text: account.folder, color: .accentColor)
-                    }
-                    if account.access != .unknown {
-                        Chip(text: account.access.short,
-                             color: account.access == .fullAccess ? .green : .orange,
-                             filled: true)
-                            .help(account.access.explanation)
-                    }
-                    if let level = account.summonerLevel {
-                        Chip(text: "Level \(level)", color: .secondary)
-                    }
-                    if let described = account.idleDescription {
-                        Chip(text: described,
-                             color: account.idleIsSelfInflicted ? .secondary
-                                    : (account.isDormant ? .orange : .accentColor))
-                            .help(account.idleIsSelfInflicted
-                                  ? "You played it, so this says nothing about whether anyone else has been on the account."
-                                  : "Days since the last game the client reported.")
-                    } else {
-                        Chip(text: "Never played", color: .secondary)
-                    }
-                    if let honor = account.honorLevel {
-                        Chip(text: "Honor \(honor)", color: honor >= 3 ? .green : .orange)
-                            .help(honor >= 3 ? "Honor is in good standing." : "Honor is below 3 — rewards may be locked.")
-                    }
-                    if let be = account.blueEssence {
-                        Chip(text: "\(be.grouped) BE", color: Color(red: 0.35, green: 0.62, blue: 0.92))
-                    }
-                    if let rp = account.riotPoints {
-                        Chip(text: "\(rp.grouped) RP", color: Color(red: 0.90, green: 0.55, blue: 0.30))
-                    }
-                    if let worst = account.worstActivePenalty {
-                        Chip(text: account.activePenalties.count == 1
-                             ? worst.kind.rawValue
-                             : "\(account.activePenalties.count) active penalties",
-                             color: worst.kind.accent,
-                             filled: true)
-                    }
-                }
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 8) {
-                HStack(spacing: 8) {
-                    Button(action: onRefresh) {
-                        if isRefreshing {
-                            ProgressView().controlSize(.small).scaleEffect(0.7)
-                        } else {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(isRefreshing)
-
-                    Button {
-                        showSignIn = true
-                    } label: {
-                        Label("Sign in", systemImage: "person.badge.key")
-                    }
-                    .help("Get the Riot Client to the login screen with this account's details ready")
-
-                    Button("Edit", action: onEdit)
-
-                    if let ugg = account.uggURL {
-                        Button {
-                            Clipboard.copy(ugg.absoluteString)
-                            onNotify("u.gg link copied.", false)
-                        } label: {
-                            Label("Copy u.gg", systemImage: "link")
-                        }
-                        .help(ugg.absoluteString)
-                    }
-
-                    Menu {
-                        if let ugg = account.uggURL {
-                            Button("Open on u.gg") { NSWorkspace.shared.open(ugg) }
-                            Button("Copy u.gg Link") {
-                                Clipboard.copy(ugg.absoluteString)
-                                onNotify("u.gg link copied.", false)
-                            }
-                            Divider()
-                        }
-                        Button("Change Riot ID via League Client…") { onOpenClient() }
-                        Button("Change Riot ID on the web…") {
-                            if let url = URL(string: "https://account.riotgames.com/") {
-                                NSWorkspace.shared.open(url)
+                        HStack(spacing: 7) {
+                            Text(account.gameName.isEmpty
+                                 ? (account.loginUsername.isEmpty ? "not signed in yet" : account.loginUsername)
+                                 : account.riotID)
+                                .font(.system(size: 12, design: LV.mono))
+                                .foregroundStyle(LV.muted)
+                                .textSelection(.enabled)
+                            if !account.gameName.isEmpty {
+                                Button {
+                                    Clipboard.copy(account.riotID)
+                                    onNotify("Riot ID copied.", false)
+                                } label: {
+                                    Image(systemName: "doc.on.doc").font(.system(size: 10))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(LV.dim)
                             }
                         }
-                        Divider()
-                        Button("Delete Account…", role: .destructive, action: onDelete)
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
-                    .menuStyle(.borderlessButton)
-                    .frame(width: 24)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 24)
+                .offset(y: 44)
+            }
+            .padding(.bottom, 44)
+
+            FlowRow(spacing: 7) {
+                RankPill(entry: account.soloRank)
+                if account.flexRank.tier != .unranked { RankPill(entry: account.flexRank) }
+                Pill(text: "\(account.region.display) · \(account.region.longName)",
+                     color: Color(hex: 0x6b8ce6))
+                if !account.folder.isEmpty {
+                    Pill(text: account.folder, color: LV.accent)
+                }
+                if account.access != .unknown {
+                    Pill(text: account.access.short,
+                         color: account.access == .fullAccess ? LV.good : LV.warn)
+                        .help(account.access.explanation)
+                }
+                if let level = account.summonerLevel {
+                    Pill(text: "Level \(level)", color: LV.muted, ghost: true)
+                }
+                IdlePill(account: account)
+                if let honor = account.honorLevel {
+                    Pill(text: "Honor \(honor)", color: honor >= 3 ? LV.good : LV.warn)
+                        .help(honor >= 3 ? "Honor is in good standing." : "Honor is below 3 — rewards may be locked.")
+                }
+                if let be = account.blueEssence {
+                    Pill(text: "\(be.grouped) BE", color: Color(hex: 0x5a9ee8))
+                }
+                if let rp = account.riotPoints {
+                    Pill(text: "\(rp.grouped) RP", color: Color(hex: 0xe68c4d))
+                }
+                if let worst = account.worstActivePenalty {
+                    Pill(text: account.activePenalties.count == 1
+                         ? worst.kind.rawValue
+                         : "\(account.activePenalties.count) active penalties",
+                         color: worst.kind.accent,
+                         dot: true)
                 }
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 14)
         }
+    }
+
+    // MARK: Actions
+
+    private var actions: some View {
+        HStack(spacing: 9) {
+            Button(action: onRefresh) {
+                if isRefreshing {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                } else {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.lvPrimary)
+            .disabled(isRefreshing)
+
+            Button { showSignIn = true } label: {
+                Label("Sign in", systemImage: "person.badge.key")
+            }
+            .buttonStyle(.lv)
+            .help("Get the Riot Client to the login screen with this account's details ready")
+
+            Button { onEdit() } label: { Label("Edit", systemImage: "pencil") }
+                .buttonStyle(.lv)
+
+            if let ugg = account.uggURL {
+                Button {
+                    Clipboard.copy(ugg.absoluteString)
+                    onNotify("u.gg link copied.", false)
+                } label: {
+                    Label("Copy u.gg", systemImage: "link")
+                }
+                .buttonStyle(.lv)
+                .help(ugg.absoluteString)
+            }
+
+            Spacer(minLength: 0)
+
+            Menu {
+                if let ugg = account.uggURL {
+                    Button("Open on u.gg") { NSWorkspace.shared.open(ugg) }
+                    Divider()
+                }
+                Button("Change Riot ID via League Client…") { onOpenClient() }
+                Button("Change Riot ID on the web…") {
+                    if let url = URL(string: "https://account.riotgames.com/") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Divider()
+                Button("Delete Account…", role: .destructive) {
+                    dismiss()
+                    onDelete()
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.lvIcon)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
+            Button("Close") { dismiss() }
+                .buttonStyle(.lv)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .background(LV.bg)
+        .overlay(alignment: .top) { Rectangle().fill(LV.lineSoft).frame(height: 1) }
     }
 
     private var initials: String {
@@ -341,7 +381,7 @@ struct AccountDetailView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
                     .background(
-                        RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05))
+                        RoundedRectangle(cornerRadius: 6).fill(LV.panel)
                     )
 
                     if filteredChampions.isEmpty {
@@ -353,19 +393,27 @@ struct AccountDetailView: View {
                             ? filteredChampions
                             : Array(filteredChampions.prefix(24))
 
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], spacing: 6) {
+                        // The page's `.champ` chip: the square portrait, then the name,
+                        // with anything the filter matched picked out in the accent.
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 124), spacing: 6)], spacing: 6) {
                             ForEach(shown) { champ in
-                                Text(champ.name)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
-                                    )
-                                    .help(champ.name)
+                                let hit = !championFilter.trimmingCharacters(in: .whitespaces).isEmpty
+                                HStack(spacing: 6) {
+                                    ChampionSquare(championId: champ.id)
+                                    Text(champ.name)
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundStyle(LV.text)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.leading, 4)
+                                .padding(.trailing, 9)
+                                .padding(.vertical, 4)
+                                .panel(fill: hit ? LV.accent.opacity(0.14) : LV.panel2,
+                                       radius: 8,
+                                       stroke: hit ? LV.accent.opacity(0.45) : LV.line)
+                                .help(champ.name)
                             }
                         }
 
@@ -375,8 +423,9 @@ struct AccountDetailView: View {
                                    : "Show all \(filteredChampions.count)") {
                                 withAnimation { showAllChampions.toggle() }
                             }
-                            .buttonStyle(.link)
-                            .font(.system(size: 11))
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(LV.accent)
                         }
                     }
                 }
@@ -542,7 +591,7 @@ struct AccountDetailView: View {
                         .padding(10)
                         .background(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(penalty.isActive ? penalty.kind.accent.opacity(0.12) : Color.primary.opacity(0.04))
+                                .fill(penalty.isActive ? penalty.kind.accent.opacity(0.12) : LV.panel)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)

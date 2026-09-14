@@ -236,6 +236,8 @@ struct ClientSheet: View {
             .padding(.vertical, 14)
         }
         .frame(width: 580)
+        .background(LV.bg2)
+        .tint(LV.accent)
         .task { await model.probe() }
         .sheet(isPresented: $showIconPicker) {
             if let credentials = model.credentials {
@@ -288,7 +290,7 @@ struct ClientSheet: View {
             HStack(spacing: 12) {
                 ProfileIconView(iconId: me.profileIconId,
                                 initials: String(me.gameName.prefix(1)).uppercased(),
-                                tint: .accentColor,
+                                tint: LV.accent,
                                 size: 48,
                                 corner: 10)
                 VStack(alignment: .leading, spacing: 3) {
@@ -324,7 +326,7 @@ struct ClientSheet: View {
                             Chip(text: "wallet unavailable", color: .orange)
                         }
                         if let linked = linkedAccount {
-                            Chip(text: "In vault: \(linked.displayName)", color: .accentColor)
+                            Chip(text: "In vault: \(linked.displayName)", color: LV.accent)
                         }
                     }
                 }
@@ -536,7 +538,7 @@ struct ClientSheet: View {
                     .padding(8)
                 }
                 .frame(height: 200)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(LV.panel))
             }
         }
     }
@@ -563,7 +565,7 @@ struct ClientSheet: View {
 
             HStack(alignment: .top, spacing: 12) {
                 ProfileIconView(iconId: prepSetIcon ? prepIconId : model.summoner?.profileIconId,
-                                initials: "?", tint: .accentColor, size: 46, corner: 9)
+                                initials: "?", tint: LV.accent, size: 46, corner: 9)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
@@ -702,7 +704,7 @@ struct ClientSheet: View {
                     .padding(6)
                 }
                 .frame(height: min(CGFloat(model.friends.count) * 16 + 12, 96))
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(LV.panel))
 
                 HStack(spacing: 10) {
                     Button(role: .destructive) {
@@ -796,7 +798,7 @@ struct ClientSheet: View {
                             .padding(8)
                     }
                     .frame(height: 150)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(LV.panel))
 
                     Button("Copy response") {
                         Clipboard.copy(probeResult)

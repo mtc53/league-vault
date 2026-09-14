@@ -44,7 +44,10 @@ struct LeagueVaultApp: App {
                     cycle.attach(store: store, web: web, watcher: watcher)
                 }
         }
-        .defaultSize(width: 1100, height: 720)
+        .defaultSize(width: 1220, height: 800)
+        // The window draws its own top bar, the way the published page does, so the
+        // system title bar is hidden and the traffic lights sit on ours.
+        .windowStyle(.hiddenTitleBar)
 
         // The app keeps running with its window closed — the watcher still refreshes
         // whoever signs in and still holds the offline status — so it needs somewhere to
