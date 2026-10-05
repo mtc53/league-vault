@@ -7,6 +7,7 @@
 pub mod models;
 pub mod store;
 pub mod lcu;
+pub mod view;
 
 pub use models::*;
 

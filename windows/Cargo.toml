@@ -7,6 +7,8 @@
 # built on Windows.
 [workspace]
 members = ["core"]
-# "app" (the Tauri crate) is added once its Tauri/WebView2 deps are in place;
-# it only builds on Windows, so it is kept out of the default test build here.
+# "app" (the Tauri crate) only builds on Windows (WebView2), so it is excluded
+# from this workspace: `cargo test` here stays on the portable core, and the app
+# builds on its own on a Windows machine (`cd app && cargo tauri dev`).
+exclude = ["app"]
 resolver = "2"

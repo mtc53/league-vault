@@ -586,6 +586,39 @@ impl Penalty {
         self.is_active_at(Utc::now())
     }
 
+    /// Human status line, matching the macOS `statusDisplay`.
+    pub fn status_display_at(&self, now: DateTime<Utc>) -> String {
+        if self.resolved {
+            return "Served".to_string();
+        }
+        if self.kind.is_permanent_by_nature() {
+            return "Permanent".to_string();
+        }
+        let expires = match self.expires_at {
+            None => return "Active — no end date".to_string(),
+            Some(e) => e,
+        };
+        if expires <= now {
+            return "Expired".to_string();
+        }
+        let remaining = expires - now;
+        let days = remaining.num_days();
+        if days >= 1 {
+            return format!("Active — {} day{} left", days, if days == 1 { "" } else { "s" });
+        }
+        let hours = remaining.num_hours();
+        let minutes = remaining.num_minutes() - hours * 60;
+        if hours >= 1 {
+            return format!("Active — {}h {}m left", hours, minutes);
+        }
+        let shown = remaining.num_minutes().max(1);
+        format!("Active — {} minute{} left", shown, if shown == 1 { "" } else { "s" })
+    }
+
+    pub fn status_display(&self) -> String {
+        self.status_display_at(Utc::now())
+    }
+
     /// A dodge timer is a fixed-hours wait, recorded by hand.
     pub fn dodge_timer(hours: i64, note: &str) -> Penalty {
         let now = Utc::now();

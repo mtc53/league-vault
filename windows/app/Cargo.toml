@@ -1,0 +1,48 @@
+[package]
+name = "leaguevault-app"
+version = "0.1.0"
+edition = "2021"
+description = "League Vault for Windows"
+authors = ["Corbin"]
+# The GUI shell. Windows-only (WebView2); excluded from the workspace default
+# members so `cargo test` on the portable core still runs anywhere.
+
+[lib]
+name = "leaguevault_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "leaguevault"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+leaguevault-core = { path = "../core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+# LCU talks HTTPS on 127.0.0.1 with a self-signed cert; blocking reqwest with
+# loopback-only invalid-cert acceptance keeps the transport simple.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+base64 = "0.22"
+thiserror = "2"
+
+# Windows-only: DPAPI for the vault key, process control, UIAutomation + SendInput.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Com",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+]

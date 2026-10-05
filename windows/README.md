@@ -29,18 +29,21 @@ This is a staged port. What's done and what's next:
 - [x] **Storage + password crypto** (`core/src/store.rs`) — load/save
       `accounts.json`, and AES-256-GCM sealing in the same format CryptoKit
       used, so the encryption is compatible.
-- [~] **Client (LCU) refresh** — the parsing of the League client's responses
-      (champions, wallet, honor, behaviour restrictions → penalties) is ported
-      and tested in `core/src/lcu.rs`. Rank/last-game parsing and the loopback
-      transport (lockfile discovery + HTTPS) are next; the transport is
-      Windows-specific.
-- [ ] **Tauri shell + UI** — the dashboard HTML wired to the core via Tauri
-      commands; the account editor, detail sheet, filters.
-- [ ] **League client integration (Windows)** — the live features. On macOS
-      these use Accessibility + input injection; on Windows they become
-      UIAutomation + SendInput, talking to the LCU (League Client API):
-      auto-detect sign-in, autofill login, the account cycle, appear-offline.
-      These need a Windows machine with League installed to test.
+- [x] **Client (LCU) refresh — parsing** — champions, wallet, honor, ranked
+      stats, last game and behaviour restrictions → penalties are all ported and
+      tested in `core/src/lcu.rs`, folded into an account by `apply_snapshot`.
+- [x] **Dashboard view-model** (`core/src/view.rs`) — the same `SitePayload`
+      shape the HTML renderer reads, built from accounts and tested on Linux.
+- [x] **Tauri shell + UI** (`app/`) — the dashboard HTML, made interactive and
+      wired to the core via Tauri commands: list, add/edit/delete, the detail
+      sheet, filters, and per-account actions. The vault key is sealed with
+      Windows DPAPI (replacing the Mac Keychain).
+- [~] **League client integration (Windows)** — the live features. The LCU
+      transport (lockfile discovery + loopback HTTPS) and the sign-in autofill
+      (process control + SendInput) are written in `app/src/lcu.rs` and
+      `app/src/automation.rs`. They need a Windows machine with League installed
+      to exercise and tune (UIAutomation field targeting, the fuller behaviour
+      fold, the account cycle and appear-offline land as that happens).
 - [ ] **Hub publishing** — the counts-only snapshot to myprojects.cc (already
       designed for the Mac app in the companion PR).
 
@@ -53,9 +56,18 @@ cd windows
 cargo test -p leaguevault-core
 ```
 
-**The app (Windows):** once the `app/` Tauri crate lands, it builds with the
-Tauri CLI and the WebView2 runtime (bundled on Windows 11, a small installer on
-Windows 10). Instructions will be here as that stage lands.
+**The app (Windows):** builds with the Tauri CLI and the WebView2 runtime
+(bundled on Windows 11, a small installer on Windows 10):
+
+```
+cd windows\app
+cargo install tauri-cli --version "^2"   # once
+cargo tauri dev                          # run it
+cargo tauri build                        # build an installer
+```
+
+See `app/README.md` for the full command surface and what still needs a live
+League client to exercise.
 
 ## Migrating your vault from the Mac
 
