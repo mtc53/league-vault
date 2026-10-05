@@ -808,3 +808,25 @@ shield-and-keyhole icon if you want it back.
 
 macOS caches app icons aggressively; after replacing the bundle, `touch` it and
 `killall Dock` to see the change.
+
+## Publishing to myprojects.cc
+
+League Vault can put itself on the public hub at myprojects.cc — **counts only**.
+No account names, logins or Riot IDs ever leave this Mac; the public page shows
+the same headline numbers as the window's hero row (accounts, ranked, champions
+owned, blue essence, RP, idle, penalties, flagged) and nothing else. The full
+per-account dashboard is a separate, private thing and is never sent to the hub.
+
+Set it up under **Settings → Publish to the hub**:
+
+1. Create a fine-grained GitHub token with **Contents: write** on
+   `mtc53/myprojects-site`.
+2. Paste it into the Access token field and Save (it goes into your Keychain).
+3. Turn on "Publish counts to the hub whenever the vault changes".
+
+From then on, a refresh or edit pushes an aggregate snapshot to the site, which
+redeploys on its own. "Publish counts now" does it on demand. This is
+independent of the SFTP dashboard above — you can use either, both, or neither.
+
+The snapshot follows the site's data contract (see `DATA_CONTRACT.md` in
+myprojects-site).

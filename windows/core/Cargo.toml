@@ -1,0 +1,17 @@
+[package]
+name = "leaguevault-core"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-independent core of League Vault: model, storage, scoring, Riot API."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.8"
+
+[dev-dependencies]
+serde_json = "1"
