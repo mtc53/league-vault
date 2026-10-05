@@ -1,0 +1,12 @@
+# Cargo workspace for the Windows port of League Vault.
+#
+# `core` is the platform-independent heart of the app — the data model, storage,
+# scoring and the Riot API client. It has no GUI or OS-automation dependencies,
+# so it builds and `cargo test`s anywhere. `app` is the Tauri shell that wires
+# that core to the existing HTML dashboard and to Windows-only automation; it is
+# built on Windows.
+[workspace]
+members = ["core"]
+# "app" (the Tauri crate) is added once its Tauri/WebView2 deps are in place;
+# it only builds on Windows, so it is kept out of the default test build here.
+resolver = "2"
