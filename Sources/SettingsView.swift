@@ -21,6 +21,11 @@ struct SettingsView: View {
     @State private var webMessage: String?
     @State private var webIsError = false
 
+    @State private var siteToken = ""
+    @State private var showSiteToken = false
+    @State private var hubMessage: String?
+    @State private var hubIsError = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Settings")
@@ -83,6 +88,8 @@ struct SettingsView: View {
                     serverSection
 
                     webSection
+
+                    hubSection
 
                     FormSection("Cache") {
                         HStack(spacing: 10) {
@@ -251,6 +258,82 @@ struct SettingsView: View {
             }
         }
         .onAppear { webPassphrase = web.passphrase ?? "" }
+    }
+
+    // MARK: Publish to the public hub
+
+    private var hubSection: some View {
+        FormSection("Publish to the hub") {
+            Text("Puts League Vault on myprojects.cc — counts only. No account names, logins or Riot IDs ever leave this Mac; the public page shows the same headline numbers as the window's hero row and nothing else.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Publish counts to the hub whenever the vault changes", isOn: $web.publishToSiteEnabled)
+                .toggleStyle(.checkbox)
+
+            Field("Site repository") {
+                TextField("mtc53/myprojects-site", text: $web.siteRepo)
+            }
+            Field("Access token") {
+                HStack(spacing: 6) {
+                    if showSiteToken {
+                        TextField("github_pat_…", text: $siteToken)
+                    } else {
+                        SecureField("github_pat_…", text: $siteToken)
+                    }
+                    Button { showSiteToken.toggle() } label: {
+                        Image(systemName: showSiteToken ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Text("A fine-grained GitHub token with Contents: write on that repository. Kept in your Keychain.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button("Save token") {
+                    web.siteToken = siteToken
+                    hubMessage = "Token saved."
+                    hubIsError = false
+                }
+                .disabled(siteToken.isEmpty)
+                if web.hasSiteToken {
+                    Label("A token is saved", systemImage: "lock.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+            }
+
+            Divider().padding(.vertical, 2)
+
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        let ok = await web.publishToSite(reason: "manual")
+                        hubIsError = !ok
+                        hubMessage = ok ? "Published counts for \(store.accounts.count) accounts." : web.lastError
+                    }
+                } label: { Text("Publish counts now") }
+                .disabled(!web.hasSiteToken)
+                Spacer()
+            }
+
+            if let hubMessage {
+                Label(hubMessage, systemImage: hubIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(hubIsError ? .red : .green)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let last = web.lastSitePublish {
+                Text("Last published to the hub \(last.relativeDisplay)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { siteToken = web.siteToken ?? "" }
     }
 
     // MARK: Automatic refresh

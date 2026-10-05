@@ -302,6 +302,12 @@ final class WebDashboard: ObservableObject {
     /// a run exists to bring everything up to date, so it should end on the site.
     @Published var publishAfterCycle: Bool { didSet { defaults.set(publishAfterCycle, forKey: Keys.afterCycle) } }
 
+    /// Also push an aggregate, no-names snapshot to the public hub (myprojects.cc).
+    @Published var publishToSiteEnabled: Bool { didSet { defaults.set(publishToSiteEnabled, forKey: Keys.toSite) } }
+    /// "owner/name" of the site repo the snapshot is dispatched to.
+    @Published var siteRepo: String { didSet { defaults.set(siteRepo, forKey: Keys.siteRepo) } }
+    @Published private(set) var lastSitePublish: Date?
+
     @Published private(set) var lastPublish: Date?
     @Published private(set) var lastError: String?
     @Published private(set) var isBusy = false
@@ -311,6 +317,8 @@ final class WebDashboard: ObservableObject {
         static let enabled = "webEnabled", path = "webPath", url = "webURL"
         static let title = "webTitle", locked = "webLocked", logins = "webLogins"
         static let last = "webLastPublish", afterCycle = "webPublishAfterCycle"
+        static let toSite = "webPublishToSite", siteRepo = "webSiteRepo"
+        static let siteLast = "webLastSitePublish"
     }
 
     private let defaults = UserDefaults.standard
@@ -328,7 +336,29 @@ final class WebDashboard: ObservableObject {
         includeLogins = defaults.bool(forKey: Keys.logins)
         publishAfterCycle = defaults.object(forKey: Keys.afterCycle) as? Bool ?? true
         lastPublish = defaults.object(forKey: Keys.last) as? Date
+        publishToSiteEnabled = defaults.bool(forKey: Keys.toSite)
+        siteRepo = defaults.string(forKey: Keys.siteRepo) ?? "mtc53/myprojects-site"
+        lastSitePublish = defaults.object(forKey: Keys.siteLast) as? Date
     }
+
+    /// Token with "contents: write" on the site repo, kept in the Keychain so an
+    /// automatic publish can run without asking.
+    var siteToken: String? {
+        get {
+            guard let data = Keychain.read("site-token") else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        set {
+            if let newValue, !newValue.isEmpty {
+                _ = Keychain.write(Data(newValue.utf8), account: "site-token")
+            } else {
+                Keychain.delete("site-token")
+            }
+        }
+    }
+
+    var hasSiteToken: Bool { !(siteToken ?? "").isEmpty }
+    var canPublishToSite: Bool { publishToSiteEnabled && hasSiteToken }
 
     /// Kept in the Keychain so an automatic publish can run without asking.
     var passphrase: String? {
@@ -373,12 +403,15 @@ final class WebDashboard: ObservableObject {
 
     /// A burst of edits should publish once, not twenty times.
     private func scheduleDebounced() {
-        guard isEnabled, isConfigured else { return }
+        let sftp = isEnabled && isConfigured
+        let site = canPublishToSite
+        guard sftp || site else { return }
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 30_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.publish(reason: "vault changed")
+            if sftp { await self?.publish(reason: "vault changed") }
+            if site { await self?.publishToSite(reason: "vault changed") }
         }
     }
 
@@ -471,6 +504,29 @@ final class WebDashboard: ObservableObject {
             return true
         } catch {
             lastError = "\(reason.capitalized) publish failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Push an aggregate, no-names snapshot to the public hub. Independent of the
+    /// SFTP dashboard: this works even with no server configured.
+    @discardableResult
+    func publishToSite(reason: String) async -> Bool {
+        guard let store else { lastError = "The vault is not loaded yet."; return false }
+        guard let token = siteToken, !token.isEmpty else {
+            lastError = "No site token saved — add one under “Publish to the hub”."
+            return false
+        }
+        let summary = VaultSummary(store.accounts)
+        do {
+            try await SitePublisher.publish(summary: summary, title: title,
+                                            repo: siteRepo, token: token)
+            lastSitePublish = Date()
+            defaults.set(lastSitePublish, forKey: Keys.siteLast)
+            log.append("Published \(summary.accounts) accounts (counts only) to the hub.")
+            return true
+        } catch {
+            lastError = "\(reason.capitalized) hub publish failed: \(error.localizedDescription)"
             return false
         }
     }
