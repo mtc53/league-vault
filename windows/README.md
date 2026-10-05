@@ -29,8 +29,11 @@ This is a staged port. What's done and what's next:
 - [x] **Storage + password crypto** (`core/src/store.rs`) — load/save
       `accounts.json`, and AES-256-GCM sealing in the same format CryptoKit
       used, so the encryption is compatible.
-- [ ] **Riot API client** — refresh rank, last game, champions, wallet from
-      Riot's public API (HTTPS, cross-platform).
+- [~] **Client (LCU) refresh** — the parsing of the League client's responses
+      (champions, wallet, honor, behaviour restrictions → penalties) is ported
+      and tested in `core/src/lcu.rs`. Rank/last-game parsing and the loopback
+      transport (lockfile discovery + HTTPS) are next; the transport is
+      Windows-specific.
 - [ ] **Tauri shell + UI** — the dashboard HTML wired to the core via Tauri
       commands; the account editor, detail sheet, filters.
 - [ ] **League client integration (Windows)** — the live features. On macOS
